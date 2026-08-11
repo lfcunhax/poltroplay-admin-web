@@ -86,7 +86,8 @@ function NotificationsAdmin() {
       });
 
       // Dispara a notificação real usando o nosso backend local
-      const backendResponse = await fetch('http://localhost:3000/api/notifications/send', {
+      const backendUrl = import.meta.env.VITE_API_URL || 'https://api.leflow.com.br';
+      const backendResponse = await fetch(`${backendUrl}/api/notifications/send`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
