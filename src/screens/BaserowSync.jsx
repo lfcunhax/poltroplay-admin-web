@@ -214,7 +214,6 @@ function BaserowSync() {
     }
   };
 
-  const handleConnect = async (e) => {
 
   const handleConnect = async (e) => {
     e.preventDefault();
