@@ -140,7 +140,7 @@ function XtreamSync() {
           continue; // Pula a inserção se já existir
         }
 
-        const combinedTags = ['xtream', ...(stream.tmdbTags || [])];
+        const combinedTags = [...(stream.tmdbTags || [])];
 
         const docData = {
           tmdbId: stream.tmdbId || null,

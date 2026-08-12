@@ -150,7 +150,7 @@ function BaserowSync() {
           const querySnapshot = await getDocs(q);
           if (!querySnapshot.empty) continue; 
 
-          const combinedTags = ['baserow', ...(stream.tmdbTags || [])];
+          const combinedTags = [...(typeof stream !== 'undefined' ? stream.tmdbTags : (typeof data !== 'undefined' && data.info ? data.info.tmdbTags : (typeof seriesData !== 'undefined' && seriesData.info ? seriesData.info.tmdbTags : []))) || []];
           await addDoc(collection(db, 'movies'), {
             tmdbId: stream.tmdbId, title: stream.title, overview: stream.overview || '',
             posterPath: stream.posterPath || null, backdropPath: stream.backdropPath || null,
@@ -177,7 +177,7 @@ function BaserowSync() {
           const querySnapshot = await getDocs(q);
           
           if (querySnapshot.empty) {
-            const combinedTags = ['baserow', ...(data.info.tmdbTags || [])];
+            const combinedTags = [...(typeof stream !== 'undefined' ? stream.tmdbTags : (typeof data !== 'undefined' && data.info ? data.info.tmdbTags : (typeof seriesData !== 'undefined' && seriesData.info ? seriesData.info.tmdbTags : []))) || []];
             seriesDocRef = await addDoc(collection(db, 'series'), {
               tmdbId: data.info.tmdbId, title: data.info.title, overview: data.info.overview || '',
               posterPath: data.info.posterPath || null, backdropPath: data.info.backdropPath || null,
@@ -498,7 +498,7 @@ function BaserowSync() {
           const querySnapshot = await getDocs(q);
           if (!querySnapshot.empty) continue; 
 
-          const combinedTags = ['baserow', ...(stream.tmdbTags || [])];
+          const combinedTags = [...(typeof stream !== 'undefined' ? stream.tmdbTags : (typeof data !== 'undefined' && data.info ? data.info.tmdbTags : (typeof seriesData !== 'undefined' && seriesData.info ? seriesData.info.tmdbTags : []))) || []];
 
           await addDoc(collection(db, 'movies'), {
             tmdbId: stream.tmdbId,
@@ -546,7 +546,7 @@ function BaserowSync() {
             seriesDocId = querySnapshot.docs[0].id; // Já existe, pegar o ID
           } else {
             // Criar nova série
-            const combinedTags = ['baserow', ...(seriesData.info.tmdbTags || [])];
+            const combinedTags = [...(typeof stream !== 'undefined' ? stream.tmdbTags : (typeof data !== 'undefined' && data.info ? data.info.tmdbTags : (typeof seriesData !== 'undefined' && seriesData.info ? seriesData.info.tmdbTags : []))) || []];
             const docRef = await addDoc(collection(db, 'series'), {
               tmdbId: seriesData.info.tmdbId,
               title: seriesData.info.title,

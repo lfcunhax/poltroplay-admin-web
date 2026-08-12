@@ -81,7 +81,7 @@ function MoviesAdmin() {
         ? response.data.genres.map(g => g.name)
         : (response.data.genre_ids || []).map(id => genreMap[id]);
       const validGenreNames = genreNames.filter(name => name);
-      setTags([...new Set(['recent', ...validGenreNames])]); // Default to include 'recent' and the extracted genres
+      const relYear = tmdbData.release_date ? parseInt(tmdbData.release_date.split('-')[0]) : 0; const isRecent = relYear >= new Date().getFullYear() - 1; setTags([...new Set([...(isRecent ? ['recent'] : []), ...validGenreNames])]); // Default to include 'recent' and the extracted genres
 
     } catch (error) {
       alert("Filme não encontrado no TMDB. Verifique o ID.");
