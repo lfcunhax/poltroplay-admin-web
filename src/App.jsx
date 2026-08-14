@@ -16,6 +16,9 @@ import UsersAdmin from './screens/UsersAdmin';
 import NotificationsAdmin from './screens/NotificationsAdmin';
 import PromotionsAdmin from './screens/PromotionsAdmin';
 import SettingsAdmin from './screens/SettingsAdmin';
+import PrivacyPolicy from './screens/PrivacyPolicy';
+import TermsOfService from './screens/TermsOfService';
+import AboutPage from './screens/AboutPage';
 
 function PrivateRoute({ children }) {
   const [user, setUser] = useState(null);
@@ -187,6 +190,9 @@ function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<Login />} />
+        <Route path="/privacy" element={<PrivacyPolicy />} />
+        <Route path="/terms" element={<TermsOfService />} />
+        <Route path="/about" element={<AboutPage />} />
         
         {/* Protected Routes */}
         <Route path="/" element={<PrivateRoute><Dashboard /></PrivateRoute>} />
