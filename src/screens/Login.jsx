@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { signInWithEmailAndPassword } from 'firebase/auth';
-import { auth } from '../firebase';
+import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
+import { doc, getDoc } from 'firebase/firestore';
+import { auth, db } from '../firebase';
 import { Lock } from 'lucide-react';
 
 function Login() {
@@ -17,13 +18,30 @@ function Login() {
     setLoading(true);
 
     try {
-      await signInWithEmailAndPassword(auth, email, password);
-      // Here we could also check if the user has admin role in Firestore
+      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      
+      // Check if user has admin role
+      const userDocRef = doc(db, 'users', userCredential.user.uid);
+      const userDocSnap = await getDoc(userDocRef);
+      
+      if (!userDocSnap.exists() || userDocSnap.data().role !== 'admin') {
+        await signOut(auth);
+        setError('Acesso negado. Esta conta não possui privilégios de administrador.');
+        setLoading(false);
+        return;
+      }
+
       navigate('/');
     } catch (err) {
-      setError('Credenciais inválidas. Tente novamente.');
+      if (err.code === 'auth/invalid-credential' || err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password') {
+        setError('E-mail ou senha incorretos.');
+      } else {
+        setError('Erro ao fazer login. Verifique sua conexão e tente novamente.');
+      }
       console.error(err);
     } finally {
+      setLoading(false);
+    }
       setLoading(false);
     }
   };

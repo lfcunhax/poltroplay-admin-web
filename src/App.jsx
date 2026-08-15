@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Link, useLocation } from 'react-router-dom';
-import { onAuthStateChanged } from 'firebase/auth';
-import { auth } from './firebase';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { doc, getDoc } from 'firebase/firestore';
+import { auth, db } from './firebase';
 import { LayoutDashboard, Film, Tv, Users, Bell, LogOut, Cloud, Tag, Menu, ChevronLeft, Megaphone, Settings, CloudDownload, Database } from 'lucide-react';
 
 // Placeholders for screens
@@ -25,20 +26,38 @@ function PrivateRoute({ children }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      if (currentUser) {
+        try {
+          const userDocRef = doc(db, 'users', currentUser.uid);
+          const userDocSnap = await getDoc(userDocRef);
+          
+          if (userDocSnap.exists() && userDocSnap.data().role === 'admin') {
+            setUser(currentUser);
+          } else {
+            // Se existir mas não for admin, desloga
+            await signOut(auth);
+            setUser(null);
+          }
+        } catch (error) {
+          console.error("Erro ao verificar admin:", error);
+          await signOut(auth);
+          setUser(null);
+        }
+      } else {
+        setUser(null);
+      }
       setLoading(false);
     });
     return unsubscribe;
   }, []);
 
   if (loading) {
-    return <div className="app-container" style={{ alignItems: 'center', justifyContent: 'center' }}>Carregando...</div>;
+    return <div className="app-container" style={{ alignItems: 'center', justifyContent: 'center' }}>Carregando Acesso...</div>;
   }
 
-  // In a real app, also check if user has 'admin' role in Firestore
   if (!user) {
-    return <Navigate to="/login" />;
+    return <Navigate to="/login" replace />;
   }
 
   return <AdminLayout>{children}</AdminLayout>;
