@@ -90,8 +90,20 @@ function BaserowSync() {
       const parsedStreams = validRows.map(row => {
         const nome = row.Nome || row.nome || row.Name || row.name || '';
         const link = row.Link || row.link || row.Url || row.url || '';
+        
+        // Pega as colunas explícitas se existirem (ex: imagem "Temporada" e "Episódio")
+        const temporada = row.Temporada || row.temporada || row['# Temporada'] || null;
+        const episodio = row['Episódio'] || row.episodio || row.Episodio || row['# Episódio'] || null;
+        
         let limpo = nome.split(' - ')[0].split(' – ')[0].replace(/\[.*?\]|\(.*?\)/g, '').trim();
-        return { id: row.id, rawName: nome, cleanName: limpo, playbackUrl: link.trim() };
+        return { 
+          id: row.id, 
+          rawName: nome, 
+          cleanName: limpo, 
+          playbackUrl: link.trim(),
+          temporada: temporada,
+          episodio: episodio
+        };
       }).filter(s => s.cleanName !== '');
 
       setSyncProgress({ current: 0, total: parsedStreams.length, status: 'Verificando no TMDB...' });
@@ -195,23 +207,27 @@ function BaserowSync() {
             // REMOVIDA A CHECAGEM if (!epiSnap.exists()) PARA FORÇAR A CORREÇÃO
             // DE EPISÓDIOS QUE FORAM SALVOS ERRADOS ANTERIORMENTE.
             
-            // Tenta extrair Temporada e Episódio (Ex: S01E02, T01 E02, 1x02)
-            let sNum = 1;
-            let eNum = eIndex + 1; // Fallback para a ordem na lista
+            // Prioridade 1: Colunas exatas do Baserow
+            let sNum = epi.temporada ? parseInt(epi.temporada, 10) : 1;
+            let eNum = epi.episodio ? parseInt(epi.episodio, 10) : (eIndex + 1);
             
-            const seMatch = epi.rawName.match(/(?:S|T)(\d+)\s*(?:E|EP)(\d+)/i) || 
-                            epi.rawName.match(/(\d+)x(\d+)/i);
-            
-            if (seMatch) {
-              sNum = parseInt(seMatch[1], 10);
-              eNum = parseInt(seMatch[2], 10);
-            } else {
-                const epMatch = epi.rawName.match(/epis[óo]dio\s*(\d+)/i) || epi.rawName.match(/(\d+)(?!.*\d)/);
-                if (epMatch) eNum = parseInt(epMatch[1], 10);
+            // Prioridade 2: Tenta extrair do texto (nome ou link), caso não tenha as colunas preenchidas
+            if (!epi.temporada || !epi.episodio) {
+              const seMatch = epi.rawName.match(/(?:S|T)(\d+)\s*(?:E|EP)(\d+)/i) || 
+                              epi.rawName.match(/(\d+)x(\d+)/i) ||
+                              epi.playbackUrl.match(/(\d+)x(\d+)/i); // Lê "1x4" direto do link .mp4
+              
+              if (seMatch) {
+                sNum = parseInt(seMatch[1], 10);
+                eNum = parseInt(seMatch[2], 10);
+              } else {
+                  const epMatch = epi.rawName.match(/epis[óo]dio\s*(\d+)/i) || epi.rawName.match(/(\d+)(?!.*\d)/);
+                  if (epMatch) eNum = parseInt(epMatch[1], 10);
+              }
             }
 
             // Se o nome do episódio for idêntico ao nome da série (comum em listas IPTV),
-            // substituímos por um nome mais limpo.
+            // substituímos por um nome mais limpo usando o número exato capturado.
             let displayTitle = epi.rawName;
             if (displayTitle.toLowerCase().includes(data.info.title.toLowerCase()) || displayTitle.length > 40) {
                 displayTitle = `Episódio ${eNum}`;

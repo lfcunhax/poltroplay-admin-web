@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { db } from '../firebase';
 import { 
   collection, getDocs, addDoc, serverTimestamp, deleteDoc, doc, 
-  query, where, updateDoc, getCountFromServer, limit, startAfter, orderBy 
+  query, where, updateDoc, getCountFromServer, limit, startAfter, orderBy, writeBatch
 } from 'firebase/firestore';
 import axios from 'axios';
 import { Plus, Search, Trash2, ListVideo, Edit2, Star, Tv, ChevronLeft, ChevronRight } from 'lucide-react';
@@ -278,6 +278,46 @@ function SeriesAdmin() {
     }
   };
 
+  const handleWipeAllSeries = async () => {
+    if (window.confirm("PERIGO! Você tem certeza ABSOLUTA que deseja apagar TODAS as séries do banco de dados? Esta ação não pode ser desfeita.")) {
+      if (window.prompt("Digite 'CONFIRMAR' em maiúsculo para apagar tudo:") === 'CONFIRMAR') {
+        setLoading(true);
+        try {
+          const snapshot = await getDocs(collection(db, 'series'));
+          // Apagar de 100 em 100 para não estourar limite do firebase client
+          const batches = [];
+          let currentBatch = writeBatch(db);
+          let count = 0;
+
+          snapshot.docs.forEach((document) => {
+            currentBatch.delete(document.ref);
+            count++;
+            if (count === 400) {
+              batches.push(currentBatch.commit());
+              currentBatch = writeBatch(db);
+              count = 0;
+            }
+          });
+          
+          if (count > 0) batches.push(currentBatch.commit());
+          
+          await Promise.all(batches);
+          
+          alert("Todas as séries foram apagadas com sucesso.");
+          setPage(1);
+          setPageHistory([null]);
+          fetchTotalCount();
+          fetchSeries(null);
+        } catch (e) {
+          console.error("Erro ao apagar séries:", e);
+          alert("Ocorreu um erro ao apagar as séries. Veja o console.");
+        } finally {
+          setLoading(false);
+        }
+      }
+    }
+  };
+
   const resetAddForm = () => {
     setTmdbId('');
     setPreview(null);
@@ -353,6 +393,19 @@ function SeriesAdmin() {
           <button className="btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '8px', height: 'fit-content' }} onClick={() => setIsAddModalOpen(true)}>
             <Plus size={20} />
             Nova Série
+          </button>
+          
+          <button 
+            style={{ 
+              display: 'flex', alignItems: 'center', gap: '8px', height: 'fit-content',
+              backgroundColor: 'rgba(233, 69, 96, 0.1)', color: 'var(--accent-alt)',
+              padding: '12px 24px', borderRadius: '12px', fontWeight: '600', transition: 'all 0.3s ease',
+              border: '1px solid rgba(233, 69, 96, 0.2)'
+            }} 
+            onClick={handleWipeAllSeries}
+          >
+            <Trash2 size={20} />
+            Limpar Tudo
           </button>
         </div>
       </div>
