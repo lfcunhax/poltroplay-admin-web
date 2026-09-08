@@ -200,12 +200,12 @@ function BaserowSync() {
             seriesDocRef = querySnapshot.docs[0].ref;
           }
 
+          // --- DEDUPLICAÇÃO DE EPISÓDIOS ---
+          // Para evitar que a mesma temporada/episódio ou mesmo link seja salvo duas vezes (caso duplicado no Baserow)
+          const uniqueEpisodesMap = new Map();
+          
           for (let eIndex = 0; eIndex < data.episodes.length; eIndex++) {
             const epi = data.episodes[eIndex];
-            const epiRef = doc(seriesDocRef, 'episodes', epi.id.toString());
-            const epiSnap = await getDoc(epiRef);
-            // REMOVIDA A CHECAGEM if (!epiSnap.exists()) PARA FORÇAR A CORREÇÃO
-            // DE EPISÓDIOS QUE FORAM SALVOS ERRADOS ANTERIORMENTE.
             
             // Prioridade 1: Colunas exatas do Baserow
             let sNum = epi.temporada ? parseInt(epi.temporada, 10) : 1;
@@ -226,18 +226,35 @@ function BaserowSync() {
               }
             }
 
-            // Se o nome do episódio for idêntico ao nome da série (comum em listas IPTV),
-            // substituímos por um nome mais limpo usando o número exato capturado.
-            let displayTitle = epi.rawName;
-            if (displayTitle.toLowerCase().includes(data.info.title.toLowerCase()) || displayTitle.length > 40) {
-                displayTitle = `Episódio ${eNum}`;
-            }
+            // Chave única para evitar duplicação
+            const uniqueKey = `S${sNum}E${eNum}`;
+            
+            if (!uniqueEpisodesMap.has(uniqueKey)) {
+              // Se o nome do episódio for idêntico ao nome da série (comum em listas IPTV),
+              // substituímos por um nome mais limpo usando o número exato capturado.
+              let displayTitle = epi.rawName;
+              if (displayTitle.toLowerCase().includes(data.info.title.toLowerCase()) || displayTitle.length > 40) {
+                  displayTitle = `Episódio ${eNum}`;
+              }
 
+              uniqueEpisodesMap.set(uniqueKey, {
+                id: epi.id.toString(), // o ID real que veio do baserow
+                title: displayTitle, 
+                seasonNumber: sNum,
+                episodeNumber: eNum,
+                videoUrl: epi.playbackUrl || ''
+              });
+            }
+          }
+
+          // Agora iteramos e salvamos apenas os episódios únicos no Firestore
+          for (const epiData of uniqueEpisodesMap.values()) {
+            const epiRef = doc(seriesDocRef, 'episodes', epiData.id);
             await setDoc(epiRef, {
-              title: displayTitle, 
-              seasonNumber: sNum,
-              episodeNumber: eNum,
-              videoUrl: epi.playbackUrl || '',
+              title: epiData.title, 
+              seasonNumber: epiData.seasonNumber,
+              episodeNumber: epiData.episodeNumber,
+              videoUrl: epiData.videoUrl,
               updatedAt: serverTimestamp() // Usamos merge para não apagar dados que já existam
             }, { merge: true });
           }
