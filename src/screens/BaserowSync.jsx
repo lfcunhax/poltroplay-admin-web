@@ -200,77 +200,49 @@ function BaserowSync() {
             seriesDocRef = querySnapshot.docs[0].ref;
           }
 
-          // --- DEDUPLICAÇÃO DE EPISÓDIOS ---
-          // Para evitar que a mesma temporada/episódio ou mesmo link seja salvo duas vezes (caso duplicado no Baserow)
-          const uniqueEpisodesMap = new Map();
-          
-          for (let eIndex = 0; eIndex < data.episodes.length; eIndex++) {
-            const epi = data.episodes[eIndex];
-            
-            // Prioridade 1: Colunas exatas do Baserow
-            let sNum = epi.temporada ? parseInt(epi.temporada, 10) : 1;
-            let eNum = epi.episodio ? parseInt(epi.episodio, 10) : (eIndex + 1);
-            
-            // Prioridade 2: Tenta extrair do texto (nome ou link), caso não tenha as colunas preenchidas
-            if (!epi.temporada || !epi.episodio) {
-              const seMatch = epi.rawName.match(/(?:S|T)(\d+)\s*(?:E|EP)(\d+)/i) || 
-                              epi.rawName.match(/(\d+)x(\d+)/i) ||
-                              epi.playbackUrl.match(/(\d+)x(\d+)/i); // Lê "1x4" direto do link .mp4
-              
-              if (seMatch) {
-                sNum = parseInt(seMatch[1], 10);
-                eNum = parseInt(seMatch[2], 10);
-              } else {
-                  const epMatch = epi.rawName.match(/epis[óo]dio\s*(\d+)/i) || epi.rawName.match(/(\d+)(?!.*\d)/);
-                  if (epMatch) eNum = parseInt(epMatch[1], 10);
-              }
-            }
+          // ============================================================
+          // NOVA LÓGICA: O LINK É A ÚNICA FONTE DA VERDADE
+          // Padrão: .../SHD7/108978/1x4.mp4 → Temporada 1, Episódio 4
+          // Deduplicação: usa o padrão TxE como chave única.
+          // ============================================================
+          const uniqueEpisodesMap = new Map(); // chave: "S1E4" → dados do ep
 
-            // Chave única para evitar duplicação
+          for (const epi of data.episodes) {
+            const url = (epi.playbackUrl || '').trim();
+            
+            // Extrai o padrão NxN do final da URL (ex: 1x4.mp4 → T=1, E=4)
+            const urlMatch = url.match(/\/(\d+)x(\d+)(?:\.[a-z0-9]+)?(?:\?.*)?$/i);
+            
+            if (!urlMatch) continue; // Pula qualquer linha sem padrão válido no link
+            
+            const sNum = parseInt(urlMatch[1], 10);
+            const eNum = parseInt(urlMatch[2], 10);
             const uniqueKey = `S${sNum}E${eNum}`;
-            const urlKey = epi.playbackUrl ? epi.playbackUrl.trim().toLowerCase() : uniqueKey;
-            
-            // Só adiciona se não existir a chave SxE E também se não existir nenhum episódio com este mesmo link exato
-            const alreadyExistsBySxE = uniqueEpisodesMap.has(uniqueKey);
-            const alreadyExistsByUrl = Array.from(uniqueEpisodesMap.values()).some(e => e.videoUrl.toLowerCase() === urlKey);
 
-            if (!alreadyExistsBySxE && (!alreadyExistsByUrl || !epi.playbackUrl)) {
-              
-              // Padronização absoluta do nome do episódio
-              // Se o nome no baserow for "episodio 2", "Episódio", "Agente Kim", etc, forçamos um padrão limpo.
-              let displayTitle = epi.rawName.trim();
-              const nameLower = displayTitle.toLowerCase();
-              
-              const isGenericName = nameLower.includes('epis') || 
-                                    nameLower.includes('temp') || 
-                                    nameLower.includes(data.info.title.toLowerCase()) || 
-                                    displayTitle.length > 40 ||
-                                    displayTitle.length < 3 ||
-                                    /^[0-9]+$/.test(nameLower);
+            // Se já existe um episódio S1E4, ignora o duplicado
+            if (uniqueEpisodesMap.has(uniqueKey)) continue;
 
-              if (isGenericName) {
-                  displayTitle = `Episódio ${eNum}`;
-              }
+            // Título padrão limpo: "Episódio 4"
+            const displayTitle = `Episódio ${eNum}`;
 
-              uniqueEpisodesMap.set(uniqueKey, {
-                id: epi.id.toString(), // o ID real que veio do baserow
-                title: displayTitle, 
-                seasonNumber: sNum,
-                episodeNumber: eNum,
-                videoUrl: epi.playbackUrl || ''
-              });
-            }
+            uniqueEpisodesMap.set(uniqueKey, {
+              id: `${sNum}x${eNum}`, // ID determinístico: nunca cria duplicata mesmo re-sincronizando
+              title: displayTitle,
+              seasonNumber: sNum,
+              episodeNumber: eNum,
+              videoUrl: url
+            });
           }
 
-          // Agora iteramos e salvamos apenas os episódios únicos no Firestore
+          // Salva todos os episódios únicos no Firestore usando o ID determinístico
           for (const epiData of uniqueEpisodesMap.values()) {
             const epiRef = doc(seriesDocRef, 'episodes', epiData.id);
             await setDoc(epiRef, {
-              title: epiData.title, 
+              title: epiData.title,
               seasonNumber: epiData.seasonNumber,
               episodeNumber: epiData.episodeNumber,
               videoUrl: epiData.videoUrl,
-              updatedAt: serverTimestamp() // Usamos merge para não apagar dados que já existam
+              updatedAt: serverTimestamp()
             }, { merge: true });
           }
         }
