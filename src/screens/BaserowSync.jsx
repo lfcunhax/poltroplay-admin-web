@@ -228,12 +228,27 @@ function BaserowSync() {
 
             // Chave única para evitar duplicação
             const uniqueKey = `S${sNum}E${eNum}`;
+            const urlKey = epi.playbackUrl ? epi.playbackUrl.trim().toLowerCase() : uniqueKey;
             
-            if (!uniqueEpisodesMap.has(uniqueKey)) {
-              // Se o nome do episódio for idêntico ao nome da série (comum em listas IPTV),
-              // substituímos por um nome mais limpo usando o número exato capturado.
-              let displayTitle = epi.rawName;
-              if (displayTitle.toLowerCase().includes(data.info.title.toLowerCase()) || displayTitle.length > 40) {
+            // Só adiciona se não existir a chave SxE E também se não existir nenhum episódio com este mesmo link exato
+            const alreadyExistsBySxE = uniqueEpisodesMap.has(uniqueKey);
+            const alreadyExistsByUrl = Array.from(uniqueEpisodesMap.values()).some(e => e.videoUrl.toLowerCase() === urlKey);
+
+            if (!alreadyExistsBySxE && (!alreadyExistsByUrl || !epi.playbackUrl)) {
+              
+              // Padronização absoluta do nome do episódio
+              // Se o nome no baserow for "episodio 2", "Episódio", "Agente Kim", etc, forçamos um padrão limpo.
+              let displayTitle = epi.rawName.trim();
+              const nameLower = displayTitle.toLowerCase();
+              
+              const isGenericName = nameLower.includes('epis') || 
+                                    nameLower.includes('temp') || 
+                                    nameLower.includes(data.info.title.toLowerCase()) || 
+                                    displayTitle.length > 40 ||
+                                    displayTitle.length < 3 ||
+                                    /^[0-9]+$/.test(nameLower);
+
+              if (isGenericName) {
                   displayTitle = `Episódio ${eNum}`;
               }
 
