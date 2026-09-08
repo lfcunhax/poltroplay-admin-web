@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { db } from '../firebase';
-import { collection, addDoc, serverTimestamp, query, where, getDocs, getDoc, deleteDoc, doc, writeBatch } from 'firebase/firestore';
+import { collection, addDoc, setDoc, serverTimestamp, query, where, getDocs, getDoc, deleteDoc, doc, writeBatch, updateDoc } from 'firebase/firestore';
 import axios from 'axios';
 import { Database, Search, CheckCircle, AlertTriangle, UploadCloud, Trash2 } from 'lucide-react';
 
