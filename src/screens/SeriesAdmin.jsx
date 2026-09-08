@@ -299,30 +299,55 @@ function SeriesAdmin() {
       if (window.prompt("Digite 'CONFIRMAR' em maiúsculo para apagar tudo:") === 'CONFIRMAR') {
         setLoading(true);
         try {
-          const snapshot = await getDocs(collection(db, 'series'));
-          
-          for (const seriesDoc of snapshot.docs) {
-            const seriesId = seriesDoc.id;
-            // Busca e apaga subcoleção episodes
-            const epiSnap = await getDocs(collection(db, 'series', seriesId, 'episodes'));
-            if (!epiSnap.empty) {
-              const epiBatch = writeBatch(db);
-              epiSnap.docs.forEach(ep => epiBatch.delete(ep.ref));
-              await epiBatch.commit();
-            }
-            // Apaga o documento principal da série
-            await deleteDoc(seriesDoc.ref);
-          }
-          
-          alert("Todas as séries e episódios foram apagados com sucesso.");
-          setPage(1);
-          setPageHistory([null]);
-          fetchTotalCount();
-          fetchSeries(null);
+          // 1. Apagar TODOS os episódios (usando collectionGroup para pegar até os de séries fantasmas)
+          import('firebase/firestore').then(async ({ collectionGroup }) => {
+             const episodesQuery = collectionGroup(db, 'episodes');
+             const episodesSnap = await getDocs(episodesQuery);
+             
+             let currentBatch = writeBatch(db);
+             let count = 0;
+             const batches = [];
+             
+             episodesSnap.docs.forEach((doc) => {
+               currentBatch.delete(doc.ref);
+               count++;
+               if (count === 400) {
+                 batches.push(currentBatch.commit());
+                 currentBatch = writeBatch(db);
+                 count = 0;
+               }
+             });
+             if (count > 0) batches.push(currentBatch.commit());
+             await Promise.all(batches);
+             
+             // 2. Apagar todas as Séries (documentos principais)
+             const seriesSnap = await getDocs(collection(db, 'series'));
+             let seriesBatch = writeBatch(db);
+             let sCount = 0;
+             const sBatches = [];
+             
+             seriesSnap.docs.forEach((doc) => {
+               seriesBatch.delete(doc.ref);
+               sCount++;
+               if (sCount === 400) {
+                 sBatches.push(seriesBatch.commit());
+                 seriesBatch = writeBatch(db);
+                 sCount = 0;
+               }
+             });
+             if (sCount > 0) sBatches.push(seriesBatch.commit());
+             await Promise.all(sBatches);
+
+             alert("Limpeza profunda concluída! Todos os fantasmas foram exorcizados.");
+             setPage(1);
+             setPageHistory([null]);
+             fetchTotalCount();
+             fetchSeries(null);
+             setLoading(false);
+          });
         } catch (e) {
           console.error("Erro ao apagar séries:", e);
           alert("Ocorreu um erro ao apagar as séries. Veja o console.");
-        } finally {
           setLoading(false);
         }
       }
