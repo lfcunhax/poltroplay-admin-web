@@ -270,40 +270,51 @@ function SeriesAdmin() {
   };
 
   const handleDelete = async (id) => {
-    if (window.confirm("Tem certeza que deseja excluir esta série? (Isso não exclui os episódios do banco ainda)")) {
-      await deleteDoc(doc(db, 'series', id));
-      fetchTotalCount();
-      const cursor = page === 1 ? null : pageHistory[page - 1];
-      fetchSeries(cursor);
+    if (window.confirm("Tem certeza que deseja excluir esta série e TODOS os seus episódios?")) {
+      setLoading(true);
+      try {
+        // Apaga os episódios primeiro
+        const episodesSnap = await getDocs(collection(db, 'series', id, 'episodes'));
+        const batch = writeBatch(db);
+        episodesSnap.docs.forEach(ep => {
+          batch.delete(ep.ref);
+        });
+        await batch.commit();
+
+        // Apaga a série
+        await deleteDoc(doc(db, 'series', id));
+        fetchTotalCount();
+        const cursor = page === 1 ? null : pageHistory[page - 1];
+        fetchSeries(cursor);
+      } catch (e) {
+        console.error("Erro ao apagar série:", e);
+      } finally {
+        setLoading(false);
+      }
     }
   };
 
   const handleWipeAllSeries = async () => {
-    if (window.confirm("PERIGO! Você tem certeza ABSOLUTA que deseja apagar TODAS as séries do banco de dados? Esta ação não pode ser desfeita.")) {
+    if (window.confirm("PERIGO! Você tem certeza ABSOLUTA que deseja apagar TODAS as séries e TODOS os episódios do banco de dados? Esta ação não pode ser desfeita.")) {
       if (window.prompt("Digite 'CONFIRMAR' em maiúsculo para apagar tudo:") === 'CONFIRMAR') {
         setLoading(true);
         try {
           const snapshot = await getDocs(collection(db, 'series'));
-          // Apagar de 100 em 100 para não estourar limite do firebase client
-          const batches = [];
-          let currentBatch = writeBatch(db);
-          let count = 0;
-
-          snapshot.docs.forEach((document) => {
-            currentBatch.delete(document.ref);
-            count++;
-            if (count === 400) {
-              batches.push(currentBatch.commit());
-              currentBatch = writeBatch(db);
-              count = 0;
+          
+          for (const seriesDoc of snapshot.docs) {
+            const seriesId = seriesDoc.id;
+            // Busca e apaga subcoleção episodes
+            const epiSnap = await getDocs(collection(db, 'series', seriesId, 'episodes'));
+            if (!epiSnap.empty) {
+              const epiBatch = writeBatch(db);
+              epiSnap.docs.forEach(ep => epiBatch.delete(ep.ref));
+              await epiBatch.commit();
             }
-          });
+            // Apaga o documento principal da série
+            await deleteDoc(seriesDoc.ref);
+          }
           
-          if (count > 0) batches.push(currentBatch.commit());
-          
-          await Promise.all(batches);
-          
-          alert("Todas as séries foram apagadas com sucesso.");
+          alert("Todas as séries e episódios foram apagados com sucesso.");
           setPage(1);
           setPageHistory([null]);
           fetchTotalCount();
