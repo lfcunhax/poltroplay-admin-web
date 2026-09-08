@@ -188,15 +188,42 @@ function BaserowSync() {
             seriesDocRef = querySnapshot.docs[0].ref;
           }
 
-          for (const epi of data.episodes) {
+          for (let eIndex = 0; eIndex < data.episodes.length; eIndex++) {
+            const epi = data.episodes[eIndex];
             const epiRef = doc(seriesDocRef, 'episodes', epi.id.toString());
             const epiSnap = await getDoc(epiRef);
-            if (!epiSnap.exists()) {
-              await setDoc(epiRef, {
-                title: epi.rawName, videoUrl: epi.playbackUrl || '',
-                createdAt: serverTimestamp()
-              });
+            // REMOVIDA A CHECAGEM if (!epiSnap.exists()) PARA FORÇAR A CORREÇÃO
+            // DE EPISÓDIOS QUE FORAM SALVOS ERRADOS ANTERIORMENTE.
+            
+            // Tenta extrair Temporada e Episódio (Ex: S01E02, T01 E02, 1x02)
+            let sNum = 1;
+            let eNum = eIndex + 1; // Fallback para a ordem na lista
+            
+            const seMatch = epi.rawName.match(/(?:S|T)(\d+)\s*(?:E|EP)(\d+)/i) || 
+                            epi.rawName.match(/(\d+)x(\d+)/i);
+            
+            if (seMatch) {
+              sNum = parseInt(seMatch[1], 10);
+              eNum = parseInt(seMatch[2], 10);
+            } else {
+                const epMatch = epi.rawName.match(/epis[óo]dio\s*(\d+)/i) || epi.rawName.match(/(\d+)(?!.*\d)/);
+                if (epMatch) eNum = parseInt(epMatch[1], 10);
             }
+
+            // Se o nome do episódio for idêntico ao nome da série (comum em listas IPTV),
+            // substituímos por um nome mais limpo.
+            let displayTitle = epi.rawName;
+            if (displayTitle.toLowerCase().includes(data.info.title.toLowerCase()) || displayTitle.length > 40) {
+                displayTitle = `Episódio ${eNum}`;
+            }
+
+            await setDoc(epiRef, {
+              title: displayTitle, 
+              seasonNumber: sNum,
+              episodeNumber: eNum,
+              videoUrl: epi.playbackUrl || '',
+              updatedAt: serverTimestamp() // Usamos merge para não apagar dados que já existam
+            }, { merge: true });
           }
         }
       }
