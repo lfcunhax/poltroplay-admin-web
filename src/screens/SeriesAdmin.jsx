@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { db } from '../firebase';
 import { 
   collection, getDocs, addDoc, serverTimestamp, deleteDoc, doc, 
-  query, where, updateDoc, getCountFromServer, limit, startAfter, orderBy, writeBatch
+  query, where, updateDoc, getCountFromServer, limit, startAfter, orderBy, writeBatch, collectionGroup
 } from 'firebase/firestore';
 import axios from 'axios';
 import { Plus, Search, Trash2, ListVideo, Edit2, Star, Tv, ChevronLeft, ChevronRight } from 'lucide-react';
@@ -300,51 +300,49 @@ function SeriesAdmin() {
         setLoading(true);
         try {
           // 1. Apagar TODOS os episódios (usando collectionGroup para pegar até os de séries fantasmas)
-          import('firebase/firestore').then(async ({ collectionGroup }) => {
-             const episodesQuery = collectionGroup(db, 'episodes');
-             const episodesSnap = await getDocs(episodesQuery);
-             
-             let currentBatch = writeBatch(db);
-             let count = 0;
-             const batches = [];
-             
-             episodesSnap.docs.forEach((doc) => {
-               currentBatch.delete(doc.ref);
-               count++;
-               if (count === 400) {
-                 batches.push(currentBatch.commit());
-                 currentBatch = writeBatch(db);
-                 count = 0;
-               }
-             });
-             if (count > 0) batches.push(currentBatch.commit());
-             await Promise.all(batches);
-             
-             // 2. Apagar todas as Séries (documentos principais)
-             const seriesSnap = await getDocs(collection(db, 'series'));
-             let seriesBatch = writeBatch(db);
-             let sCount = 0;
-             const sBatches = [];
-             
-             seriesSnap.docs.forEach((doc) => {
-               seriesBatch.delete(doc.ref);
-               sCount++;
-               if (sCount === 400) {
-                 sBatches.push(seriesBatch.commit());
-                 seriesBatch = writeBatch(db);
-                 sCount = 0;
-               }
-             });
-             if (sCount > 0) sBatches.push(seriesBatch.commit());
-             await Promise.all(sBatches);
-
-             alert("Limpeza profunda concluída! Todos os fantasmas foram exorcizados.");
-             setPage(1);
-             setPageHistory([null]);
-             fetchTotalCount();
-             fetchSeries(null);
-             setLoading(false);
+          const episodesQuery = collectionGroup(db, 'episodes');
+          const episodesSnap = await getDocs(episodesQuery);
+          
+          let currentBatch = writeBatch(db);
+          let count = 0;
+          const batches = [];
+          
+          episodesSnap.docs.forEach((doc) => {
+            currentBatch.delete(doc.ref);
+            count++;
+            if (count === 400) {
+              batches.push(currentBatch.commit());
+              currentBatch = writeBatch(db);
+              count = 0;
+            }
           });
+          if (count > 0) batches.push(currentBatch.commit());
+          await Promise.all(batches);
+          
+          // 2. Apagar todas as Séries (documentos principais)
+          const seriesSnap = await getDocs(collection(db, 'series'));
+          let seriesBatch = writeBatch(db);
+          let sCount = 0;
+          const sBatches = [];
+          
+          seriesSnap.docs.forEach((doc) => {
+            seriesBatch.delete(doc.ref);
+            sCount++;
+            if (sCount === 400) {
+              sBatches.push(seriesBatch.commit());
+              seriesBatch = writeBatch(db);
+              sCount = 0;
+            }
+          });
+          if (sCount > 0) sBatches.push(seriesBatch.commit());
+          await Promise.all(sBatches);
+
+          alert("Limpeza profunda concluída! Todos os fantasmas foram exorcizados.");
+          setPage(1);
+          setPageHistory([null]);
+          fetchTotalCount();
+          fetchSeries(null);
+          setLoading(false);
         } catch (e) {
           console.error("Erro ao apagar séries:", e);
           alert("Ocorreu um erro ao apagar as séries. Veja o console.");
