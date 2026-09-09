@@ -747,16 +747,12 @@ function BaserowSync() {
               </div>
               <div style={{ width: '200px', height: '8px', background: 'rgba(0,0,0,0.3)', borderRadius: '4px', overflow: 'hidden' }}>
                 <div style={{ width: `${(syncProgress.current / syncProgress.total) * 100}%`, height: '100%', background: 'var(--accent)', transition: 'width 0.3s' }}></div>
-              </div>
-            </div>
-          )}
-
           {/* Action Buttons */}
-          <div style={{ display: 'flex', gap: '16px', marginBottom: '24px' }}>
+          <div style={{ display: 'flex', gap: '16px', marginBottom: '20px', flexWrap: 'wrap' }}>
             <button 
               className="btn-secondary" 
-              onClick={handleMatchTmdb} 
-              disabled={loading || matchedStreams.length > 0}
+              onClick={handleSearchTMDB} 
+              disabled={loading || streams.length === 0}
               style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
             >
               <Search size={18} /> 1. Buscar no TMDB
@@ -767,12 +763,42 @@ function BaserowSync() {
               disabled={loading || matchedStreams.filter(s => s.matched).length === 0}
               style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
             >
-              <UploadCloud size={18} /> 2. Salvar no Firestore
+              <UploadCloud size={18} /> {syncType === 'movie' ? '2. Salvar no Firestore' : '2. Salvar no Banco (PostgreSQL)'}
             </button>
           </div>
 
+          {/* --- BARRA DE PROGRESSO VISUAL --- */}
+          {loading && syncProgress.total !== 0 && (
+            <div className="mb-6 p-4 bg-surface-800 rounded-xl border border-surface-700 shadow-xl overflow-hidden relative">
+              <div className="absolute inset-0 bg-primary-600/10 animate-pulse"></div>
+              <div className="relative z-10">
+                <div className="flex justify-between items-center mb-2">
+                  <span className="text-text-100 font-medium text-lg">{syncProgress.status}</span>
+                  <span className="text-primary-400 font-bold">
+                    {syncProgress.total === '?' ? syncProgress.current : `${Math.round((syncProgress.current / syncProgress.total) * 100)}%`}
+                  </span>
+                </div>
+                
+                {syncProgress.total !== '?' && (
+                  <div className="h-3 w-full bg-surface-900 rounded-full overflow-hidden">
+                    <div 
+                      className="h-full bg-gradient-to-r from-primary-500 to-accent-500 transition-all duration-300 ease-out"
+                      style={{ width: `${(syncProgress.current / syncProgress.total) * 100}%` }}
+                    ></div>
+                  </div>
+                )}
+                
+                <div className="mt-2 text-sm text-text-400 text-right">
+                  {syncProgress.total === '?' 
+                    ? `${syncProgress.current} itens processados...` 
+                    : `${syncProgress.current} de ${syncProgress.total} itens`}
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Filtros de Tabela */}
-          {matchedStreams.length > 0 && (
+          <div className="flex gap-4 mb-4">{matchedStreams.length > 0 && (
             <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
               <button 
                 className={filterMode === 'all' ? 'btn-primary' : 'btn-secondary'}
