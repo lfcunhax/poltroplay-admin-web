@@ -155,6 +155,7 @@ function BaserowSync() {
       setSyncProgress({ current: 0, total: toSync.length, status: 'Salvando no Banco de Dados...' });
       
       if (syncType === 'movie') {
+        // ── FILMES: continua no Firestore ──────────────────────────────────
         for (let i = 0; i < toSync.length; i++) {
           const stream = toSync[i];
           setSyncProgress(prev => ({ ...prev, current: i + 1 }));
@@ -162,7 +163,7 @@ function BaserowSync() {
           const querySnapshot = await getDocs(q);
           if (!querySnapshot.empty) continue; 
 
-          const combinedTags = [...(typeof stream !== 'undefined' ? stream.tmdbTags : (typeof data !== 'undefined' && data.info ? data.info.tmdbTags : (typeof seriesData !== 'undefined' && seriesData.info ? seriesData.info.tmdbTags : []))) || []];
+          const combinedTags = stream.tmdbTags || [];
           await addDoc(collection(db, 'movies'), {
             tmdbId: stream.tmdbId, title: stream.title, overview: stream.overview || '',
             posterPath: stream.posterPath || null, backdropPath: stream.backdropPath || null,
@@ -172,86 +173,73 @@ function BaserowSync() {
           });
         }
       } else {
+        // ── SÉRIES: vai para o PostgreSQL via API REST ─────────────────────
+        
+        // Agrupa todos os streams pelo tmdbId da série
         const seriesMap = {};
         toSync.forEach(stream => {
-          if (!seriesMap[stream.tmdbId]) { seriesMap[stream.tmdbId] = { info: stream, episodes: [] }; }
-          seriesMap[stream.tmdbId].episodes.push(stream);
-        });
-
-        const seriesKeys = Object.keys(seriesMap);
-        for (let i = 0; i < seriesKeys.length; i++) {
-          const sId = seriesKeys[i];
-          setSyncProgress(prev => ({ ...prev, current: i + 1, total: seriesKeys.length }));
-          const data = seriesMap[sId];
-          
-          let seriesDocRef;
-          const q = query(collection(db, 'series'), where('tmdbId', '==', data.info.tmdbId));
-          const querySnapshot = await getDocs(q);
-          
-          if (querySnapshot.empty) {
-            const combinedTags = [...(typeof stream !== 'undefined' ? stream.tmdbTags : (typeof data !== 'undefined' && data.info ? data.info.tmdbTags : (typeof seriesData !== 'undefined' && seriesData.info ? seriesData.info.tmdbTags : []))) || []];
-            seriesDocRef = await addDoc(collection(db, 'series'), {
-              tmdbId: data.info.tmdbId, title: data.info.title, overview: data.info.overview || '',
-              posterPath: data.info.posterPath || null, backdropPath: data.info.backdropPath || null,
-              voteAverage: data.info.voteAverage || 0, releaseDate: data.info.releaseDate || null,
-              tags: combinedTags, isHighlight: false, source: 'baserow', createdAt: serverTimestamp()
-            });
-          } else {
-            seriesDocRef = querySnapshot.docs[0].ref;
+          if (!seriesMap[stream.tmdbId]) { 
+            seriesMap[stream.tmdbId] = { info: stream, episodesMap: new Map() }; 
           }
+          
+          const url = (stream.playbackUrl || '').trim();
+          // Extrai o padrão NxN do link: ex. /1x4.mp4 → T=1, E=4
+          const urlMatch = url.match(/\/(\d+)x(\d+)(?:\.[a-z0-9]+)?(?:\?.*)?$/i);
+          if (!urlMatch) return; // Link sem padrão válido, ignora
 
-          // ============================================================
-          // NOVA LÓGICA: O LINK É A ÚNICA FONTE DA VERDADE
-          // Padrão: .../SHD7/108978/1x4.mp4 → Temporada 1, Episódio 4
-          // Deduplicação: usa o padrão TxE como chave única.
-          // ============================================================
-          const uniqueEpisodesMap = new Map(); // chave: "S1E4" → dados do ep
+          const sNum = parseInt(urlMatch[1], 10);
+          const eNum = parseInt(urlMatch[2], 10);
+          const key = `${sNum}x${eNum}`;
 
-          for (const epi of data.episodes) {
-            const url = (epi.playbackUrl || '').trim();
-            
-            // Extrai o padrão NxN do final da URL (ex: 1x4.mp4 → T=1, E=4)
-            const urlMatch = url.match(/\/(\d+)x(\d+)(?:\.[a-z0-9]+)?(?:\?.*)?$/i);
-            
-            if (!urlMatch) continue; // Pula qualquer linha sem padrão válido no link
-            
-            const sNum = parseInt(urlMatch[1], 10);
-            const eNum = parseInt(urlMatch[2], 10);
-            const uniqueKey = `S${sNum}E${eNum}`;
-
-            // Se já existe um episódio S1E4, ignora o duplicado
-            if (uniqueEpisodesMap.has(uniqueKey)) continue;
-
-            // Título padrão limpo: "Episódio 4"
-            const displayTitle = `Episódio ${eNum}`;
-
-            uniqueEpisodesMap.set(uniqueKey, {
-              id: `${sNum}x${eNum}`, // ID determinístico: nunca cria duplicata mesmo re-sincronizando
-              title: displayTitle,
+          // Deduplicação em memória — mesmo S/E não entra duas vezes
+          if (!seriesMap[stream.tmdbId].episodesMap.has(key)) {
+            seriesMap[stream.tmdbId].episodesMap.set(key, {
               seasonNumber: sNum,
               episodeNumber: eNum,
+              title: `Episódio ${eNum}`,
               videoUrl: url
             });
           }
+        });
 
-          // Salva todos os episódios únicos no Firestore usando o ID determinístico
-          for (const epiData of uniqueEpisodesMap.values()) {
-            const epiRef = doc(seriesDocRef, 'episodes', epiData.id);
-            await setDoc(epiRef, {
-              title: epiData.title,
-              seasonNumber: epiData.seasonNumber,
-              episodeNumber: epiData.episodeNumber,
-              videoUrl: epiData.videoUrl,
-              updatedAt: serverTimestamp()
-            }, { merge: true });
-          }
-        }
+        // Monta o payload final para enviar à API
+        const seriesPayload = Object.values(seriesMap).map(({ info, episodesMap }) => ({
+          tmdbId: info.tmdbId,
+          title: info.title,
+          overview: info.overview || '',
+          posterPath: info.posterPath || null,
+          backdropPath: info.backdropPath || null,
+          voteAverage: info.voteAverage || 0,
+          releaseDate: info.releaseDate || null,
+          tags: info.tmdbTags || [],
+          isHighlight: false,
+          episodes: Array.from(episodesMap.values())
+        }));
+
+        setSyncProgress({ current: 0, total: seriesPayload.length, status: `Enviando ${seriesPayload.length} séries para o banco PostgreSQL...` });
+
+        const SERIES_API_URL = 'http://series.leflow.com.br';
+        const ADMIN_SECRET = 'poltroplay_admin_2026';
+
+        const apiResponse = await axios.post(
+          `${SERIES_API_URL}/series/sync`,
+          { series: seriesPayload },
+          { headers: { 'x-admin-secret': ADMIN_SECRET, 'Content-Type': 'application/json' } }
+        );
+
+        const result = apiResponse.data;
+        alert(`✅ Sync PostgreSQL concluído!\n📺 Séries: ${result.insertedSeries}\n🎬 Episódios: ${result.insertedEpisodes}\n⏭️ Duplicatas ignoradas: ${result.skippedEpisodes}`);
+        setSyncProgress({ current: 0, total: 0, status: '' });
+        setStreams(parsedStreams);
+        setMatchedStreams(matched);
+        setIsConnected(true);
+        setLoading(false);
+        return;
       }
 
-      alert("🎉 Auto-Sync Inteligente Concluído com Sucesso!");
+      setSyncProgress({ current: 0, total: 0, status: '' });
       setStreams(parsedStreams);
       setMatchedStreams(matched);
-      setSyncProgress({ current: 0, total: 0, status: '' });
       setIsConnected(true);
     } catch (error) {
       console.error(error);
