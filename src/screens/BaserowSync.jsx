@@ -747,6 +747,10 @@ function BaserowSync() {
               </div>
               <div style={{ width: '200px', height: '8px', background: 'rgba(0,0,0,0.3)', borderRadius: '4px', overflow: 'hidden' }}>
                 <div style={{ width: `${(syncProgress.current / syncProgress.total) * 100}%`, height: '100%', background: 'var(--accent)', transition: 'width 0.3s' }}></div>
+              </div>
+            </div>
+          )}
+
           {/* Action Buttons */}
           <div style={{ display: 'flex', gap: '16px', marginBottom: '20px', flexWrap: 'wrap' }}>
             <button 
@@ -798,7 +802,7 @@ function BaserowSync() {
           )}
 
           {/* Filtros de Tabela */}
-          <div className="flex gap-4 mb-4">{matchedStreams.length > 0 && (
+          {matchedStreams.length > 0 && (
             <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
               <button 
                 className={filterMode === 'all' ? 'btn-primary' : 'btn-secondary'}
