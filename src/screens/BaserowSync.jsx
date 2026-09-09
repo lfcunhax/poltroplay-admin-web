@@ -218,7 +218,7 @@ function BaserowSync() {
 
         setSyncProgress({ current: 0, total: seriesPayload.length, status: `Enviando ${seriesPayload.length} séries para o banco PostgreSQL...` });
 
-        const SERIES_API_URL = 'http://series.leflow.com.br';
+        const SERIES_API_URL = 'https://series.leflow.com.br';
         const ADMIN_SECRET = 'poltroplay_admin_2026';
 
         const apiResponse = await axios.post(
