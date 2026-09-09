@@ -781,11 +781,10 @@ function BaserowSync() {
             </div>
           )}
 
-          {/* Action Buttons */}
           <div style={{ display: 'flex', gap: '16px', marginBottom: '20px', flexWrap: 'wrap' }}>
             <button 
               className="btn-secondary" 
-              onClick={handleSearchTMDB} 
+              onClick={handleMatchTmdb} 
               disabled={loading || streams.length === 0}
               style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
             >
