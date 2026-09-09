@@ -121,11 +121,60 @@ function BaserowSync() {
       const uniqueSeriesNames = syncType === 'series' ? [...new Set(parsedStreams.map(s => s.cleanName))] : [];
       const itemsToSearch = syncType === 'movie' ? parsedStreams : uniqueSeriesNames.map(name => ({ cleanName: name }));
 
+      // --- SMART OPTIMIZATION: Buscar itens já existentes para pular o TMDB ---
+      setSyncProgress({ current: 0, total: '?', status: 'Verificando banco de dados atual...' });
+      const existingItemsMap = {};
+      if (syncType === 'movie') {
+        const moviesSnap = await getDocs(collection(db, 'movies'));
+        moviesSnap.forEach(doc => {
+          const data = doc.data();
+          if (data.title) existingItemsMap[data.title.toLowerCase()] = data;
+        });
+      } else {
+        try {
+          const SERIES_API_URL = 'https://series.leflow.com.br';
+          // Buscamos um limite alto para pegar todas as séries cadastradas e cachear os IDs
+          const existingResp = await axios.get(`${SERIES_API_URL}/series?limit=5000`);
+          if (existingResp.data && existingResp.data.series) {
+            existingResp.data.series.forEach(s => {
+              if (s.title) existingItemsMap[s.title.toLowerCase()] = {
+                tmdbId: s.tmdb_id, title: s.title, overview: s.overview,
+                posterPath: s.poster_path, backdropPath: s.backdrop_path,
+                voteAverage: s.vote_average, releaseDate: s.release_date,
+                tmdbTags: s.tags || []
+              };
+            });
+          }
+        } catch (e) {
+          console.log("Erro ao buscar séries do Postgres", e);
+        }
+      }
+
       for (let i = 0; i < itemsToSearch.length; i++) {
         const itemToSearch = itemsToSearch[i];
-        setSyncProgress(prev => ({ ...prev, current: i + 1, total: itemsToSearch.length }));
+        setSyncProgress(prev => ({ ...prev, current: i + 1, total: itemsToSearch.length, status: 'Buscando capas no TMDB...' }));
         
         try {
+          const lowerName = itemToSearch.cleanName.toLowerCase();
+          
+          // Se já existe no banco, usamos o cache e PULAMOS o TMDB!
+          if (existingItemsMap[lowerName]) {
+            const existing = existingItemsMap[lowerName];
+            const tmdbInfo = {
+              tmdbId: existing.tmdbId, title: existing.title, overview: existing.overview,
+              posterPath: existing.posterPath, backdropPath: existing.backdropPath,
+              voteAverage: existing.voteAverage, releaseDate: existing.releaseDate,
+              tmdbTags: existing.tmdbTags || [], matched: true
+            };
+            if (syncType === 'movie') {
+              matched.push({ ...itemToSearch, ...tmdbInfo });
+            } else {
+              const epis = parsedStreams.filter(s => s.cleanName === itemToSearch.cleanName);
+              epis.forEach(epi => matched.push({ ...epi, ...tmdbInfo }));
+            }
+            continue; // Pula a requisição ao TMDB
+          }
+
           const tmdbType = syncType === 'movie' ? 'movie' : 'tv';
           const response = await axios.get(`https://api.themoviedb.org/3/search/${tmdbType}?api_key=${baserowConfig?.tmdbKey || DEFAULT_TMDB_KEY}&language=pt-BR&query=${encodeURIComponent(itemToSearch.cleanName)}`);
           
