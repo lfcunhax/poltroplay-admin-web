@@ -20,7 +20,7 @@ function BaserowSync() {
   const [matchedStreams, setMatchedStreams] = useState([]); 
   const [manualQueries, setManualQueries] = useState({});
   const [filterMode, setFilterMode] = useState('all'); // 'all', 'matched', 'unmatched'
-
+  const [syncModal, setSyncModal] = useState(null); // { type: 'success' | 'error', text: string }
   useEffect(() => {
     const savedConfig = localStorage.getItem('poltroplay_baserow_config');
     if (savedConfig) {
@@ -228,7 +228,7 @@ function BaserowSync() {
         );
 
         const result = apiResponse.data;
-        alert(`✅ Sync PostgreSQL concluído!\n📺 Séries: ${result.insertedSeries}\n🎬 Episódios: ${result.insertedEpisodes}\n⏭️ Duplicatas ignoradas: ${result.skippedEpisodes}`);
+        setSyncModal({ type: 'success', text: `✅ Sync PostgreSQL concluído!\n📺 Séries: ${result.insertedSeries}\n🎬 Episódios: ${result.insertedEpisodes}\n⏭️ Duplicatas ignoradas: ${result.skippedEpisodes}` });
         setSyncProgress({ current: 0, total: 0, status: '' });
         setStreams(parsedStreams);
         setMatchedStreams(matched);
@@ -243,7 +243,7 @@ function BaserowSync() {
       setIsConnected(true);
     } catch (error) {
       console.error(error);
-      alert(`Erro no Auto-Sync: ${error.message}`);
+      setSyncModal({ type: 'error', text: `Erro no Auto-Sync: ${error.message}` });
     } finally {
       setLoading(false);
     }
@@ -253,13 +253,13 @@ function BaserowSync() {
   const handleConnect = async (e) => {
     e.preventDefault();
     if (!baserowConfig || !baserowConfig.token || !baserowConfig.baseUrl) {
-      alert("Configurações do Baserow incompletas. Vá para a tela de Configurações.");
+      setSyncModal({ type: 'error', text: "Configurações do Baserow incompletas. Vá para a tela de Configurações." });
       return;
     }
     
     const tableId = syncType === 'movie' ? baserowConfig.moviesTableId : baserowConfig.seriesTableId;
     if (!tableId) {
-      alert("Preencha o ID da Tabela correspondente nas Configurações.");
+      setSyncModal({ type: 'error', text: "Preencha o ID da Tabela correspondente nas Configurações." });
       return;
     }
 
@@ -627,13 +627,13 @@ function BaserowSync() {
         }
       }
       
-      alert("Sincronização concluída com sucesso!");
+      setSyncModal({ type: 'success', text: "✅ Sincronização manual concluída com sucesso!" });
       setStreams([]);
       setMatchedStreams([]);
       setIsConnected(false);
     } catch (e) {
       console.error(e);
-      alert("Erro ao salvar no banco.");
+      setSyncModal({ type: 'error', text: "Erro ao salvar no banco: " + e.message });
     } finally {
       setSyncProgress({ current: 0, total: 0, status: '' });
       setLoading(false);
@@ -735,6 +735,36 @@ function BaserowSync() {
               Baixar Dados Manualmente (Modo Antigo)
             </button>
           </form>
+
+          {/* --- BARRA DE PROGRESSO VISUAL AUTO-SYNC --- */}
+          {loading && syncProgress.total !== 0 && (
+            <div className="mt-8 p-4 bg-surface-800 rounded-xl border border-surface-700 shadow-xl overflow-hidden relative">
+              <div className="absolute inset-0 bg-primary-600/10 animate-pulse"></div>
+              <div className="relative z-10">
+                <div className="flex justify-between items-center mb-2">
+                  <span className="text-text-100 font-medium text-lg">{syncProgress.status}</span>
+                  <span className="text-primary-400 font-bold">
+                    {syncProgress.total === '?' ? syncProgress.current : `${Math.round((syncProgress.current / syncProgress.total) * 100)}%`}
+                  </span>
+                </div>
+                
+                {syncProgress.total !== '?' && (
+                  <div className="h-3 w-full bg-surface-900 rounded-full overflow-hidden">
+                    <div 
+                      className="h-full bg-gradient-to-r from-primary-500 to-accent-500 transition-all duration-300 ease-out"
+                      style={{ width: `${(syncProgress.current / syncProgress.total) * 100}%` }}
+                    ></div>
+                  </div>
+                )}
+                
+                <div className="mt-2 text-sm text-text-400 text-right">
+                  {syncProgress.total === '?' 
+                    ? `${syncProgress.current} itens processados...` 
+                    : `${syncProgress.current} de ${syncProgress.total} itens`}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       ) : (
         <div>
@@ -899,6 +929,35 @@ function BaserowSync() {
                 ))}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* --- MODAL DE SUCESSO / ERRO --- */}
+      {syncModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-surface-800 border border-surface-700 rounded-2xl shadow-2xl max-w-md w-full overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className={`p-6 ${syncModal.type === 'success' ? 'bg-green-500/10' : 'bg-red-500/10'}`}>
+              <div className="flex items-center gap-4 mb-4">
+                <div className={`p-3 rounded-full ${syncModal.type === 'success' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+                  {syncModal.type === 'success' ? <CheckCircle size={32} /> : <AlertTriangle size={32} />}
+                </div>
+                <h3 className="text-xl font-bold m-0 text-white">
+                  {syncModal.type === 'success' ? 'Sincronização Concluída' : 'Erro na Sincronização'}
+                </h3>
+              </div>
+              <p className="text-text-200 whitespace-pre-line m-0 leading-relaxed text-sm">
+                {syncModal.text}
+              </p>
+            </div>
+            <div className="p-4 border-t border-surface-700 flex justify-end bg-surface-900/50">
+              <button 
+                onClick={() => setSyncModal(null)}
+                className="btn-primary px-8 py-2 text-sm font-semibold rounded-lg hover:scale-105 transition-transform"
+              >
+                Entendi
+              </button>
+            </div>
           </div>
         </div>
       )}
