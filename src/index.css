@@ -5,7 +5,7 @@
   --background: #09090E;
   --background-alt: #0D0D15;
   --surface: #141424;
-  --surface-card: rgba(20, 20, 36, 0.7);
+  --surface-card: rgba(20, 20, 36, 0.75);
   --surface-card-hover: rgba(28, 28, 50, 0.85);
   --surface-light: #202038;
   --surface-border: rgba(255, 255, 255, 0.07);
@@ -49,65 +49,59 @@
   padding: 0;
 }
 
+html, body, #root {
+  height: 100%;
+  max-height: 100vh;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
 body {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   background-color: var(--background);
   color: var(--text-primary);
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
-  min-height: 100vh;
-}
-
-h1, h2, h3, h4, h5, h6 {
-  font-family: 'Outfit', sans-serif;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  color: var(--text-primary);
 }
 
 /* Custom Scrollbar */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: rgba(0, 0, 0, 0.2);
+  background: rgba(9, 9, 14, 0.6);
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--surface-light);
-  border-radius: var(--radius-full);
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
   background: var(--primary-light);
 }
 
-/* Links & Buttons */
-a {
-  color: var(--accent);
-  text-decoration: none;
-  transition: all 0.2s ease;
-}
-a:hover {
-  color: var(--primary-light);
+/* Typography Utilities */
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Outfit', sans-serif;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.02em;
 }
 
+/* Buttons */
 button {
-  cursor: pointer;
   font-family: inherit;
+  cursor: pointer;
   border: none;
-  outline: none;
   background: none;
+  outline: none;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-}
-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-  transform: none !important;
 }
 
 .btn-primary {
-  background: linear-gradient(135deg, #7B2FF7 0%, #00D4FF 100%);
-  color: #FFFFFF;
+  background: linear-gradient(135deg, var(--primary) 0%, #5B1EB7 100%);
+  color: white;
   padding: 12px 24px;
   border-radius: var(--radius-md);
   font-weight: 600;
@@ -282,59 +276,76 @@ button:disabled {
 /* Inputs */
 input, select, textarea {
   width: 100%;
-  background-color: rgba(9, 9, 14, 0.6);
+  background-color: rgba(9, 9, 14, 0.7);
   border: 1px solid var(--surface-border);
   color: white;
-  padding: 12px 16px;
+  padding: 10px 14px;
   border-radius: var(--radius-md);
   font-family: inherit;
-  font-size: 0.95rem;
+  font-size: 0.9rem;
   transition: all 0.2s ease;
 }
 input:focus, select:focus, textarea:focus {
   border-color: var(--accent);
   outline: none;
   box-shadow: 0 0 0 3px var(--accent-glow);
-  background-color: rgba(9, 9, 14, 0.9);
+  background-color: rgba(9, 9, 14, 0.95);
 }
 
-/* App Layout */
+/* App Layout - LOCKED SIDEBAR & SCROLLABLE MAIN CONTENT */
 .app-container {
   display: flex;
-  min-height: 100vh;
+  height: 100vh;
+  width: 100vw;
+  max-height: 100vh;
+  overflow: hidden;
   background-color: var(--background);
 }
 .sidebar {
   width: 270px;
+  height: 100vh;
+  max-height: 100vh;
   background-color: var(--surface);
   border-right: 1px solid var(--surface-border);
   display: flex;
   flex-direction: column;
+  flex-shrink: 0;
   transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   z-index: 20;
+  overflow-y: auto;
+  overflow-x: hidden;
+  position: sticky;
+  top: 0;
+  left: 0;
 }
 .sidebar.collapsed {
   width: 82px;
 }
 .main-content {
   flex: 1;
+  height: 100vh;
+  max-height: 100vh;
   display: flex;
   flex-direction: column;
   min-width: 0;
   overflow-y: auto;
+  overflow-x: hidden;
+  position: relative;
 }
 .header {
-  height: 72px;
+  height: 74px;
   border-bottom: 1px solid var(--surface-border);
   display: flex;
   align-items: center;
   padding: 0 32px;
-  background: rgba(9, 9, 14, 0.85);
-  backdrop-filter: blur(12px);
+  background: rgba(9, 9, 14, 0.92);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   position: sticky;
   top: 0;
-  z-index: 10;
+  z-index: 15;
   justify-content: space-between;
+  flex-shrink: 0;
 }
 .content-body {
   padding: 32px;
@@ -343,16 +354,18 @@ input:focus, select:focus, textarea:focus {
 
 /* Live Terminal Log */
 .live-terminal {
-  background: #06060A;
+  background: #050508;
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: var(--radius-lg);
   padding: 16px;
   font-family: 'JetBrains Mono', monospace;
   font-size: 0.85rem;
   color: #D1D5DB;
+  height: 240px;
   max-height: 240px;
   overflow-y: auto;
-  box-shadow: inset 0 2px 10px rgba(0, 0, 0, 0.6);
+  box-shadow: inset 0 2px 12px rgba(0, 0, 0, 0.7);
+  scroll-behavior: smooth;
 }
 .terminal-line {
   display: flex;
@@ -370,16 +383,147 @@ input:focus, select:focus, textarea:focus {
 .terminal-type-warn { color: #FBBF24; font-weight: 600; }
 .terminal-type-error { color: #F87171; font-weight: 600; }
 
-/* Pulse Animation for Live Status */
-@keyframes livePulse {
-  0% { transform: scale(0.95); opacity: 0.7; }
-  50% { transform: scale(1.15); opacity: 1; }
-  100% { transform: scale(0.95); opacity: 0.7; }
+/* Database Health Status Cards & Blinking Pulse Animations */
+@keyframes blinkGlowGreen {
+  0%, 100% {
+    opacity: 1;
+    box-shadow: 0 0 10px #10B981, 0 0 4px #10B981;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.35;
+    box-shadow: none;
+    transform: scale(0.85);
+  }
 }
-.pulse-indicator {
-  width: 8px;
-  height: 8px;
+
+@keyframes blinkGlowRed {
+  0%, 100% {
+    opacity: 1;
+    box-shadow: 0 0 10px #EF4444, 0 0 4px #EF4444;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.35;
+    box-shadow: none;
+    transform: scale(0.85);
+  }
+}
+
+.status-dot-online {
+  width: 9px;
+  height: 9px;
   border-radius: 50%;
+  background-color: #10B981;
   display: inline-block;
-  animation: livePulse 2s infinite ease-in-out;
+  animation: blinkGlowGreen 1.4s infinite ease-in-out;
+  flex-shrink: 0;
+}
+
+.status-dot-offline {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background-color: #EF4444;
+  display: inline-block;
+  animation: blinkGlowRed 1.4s infinite ease-in-out;
+  flex-shrink: 0;
+}
+
+.db-status-card {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  border-radius: 12px;
+  background: rgba(20, 20, 36, 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--surface-border);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  transition: all 0.3s ease;
+}
+
+.db-status-card.online {
+  border-color: rgba(16, 185, 129, 0.32);
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.09) 0%, rgba(20, 20, 36, 0.85) 100%);
+}
+.db-status-card.offline {
+  border-color: rgba(239, 68, 68, 0.35);
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.09) 0%, rgba(20, 20, 36, 0.85) 100%);
+}
+
+.db-status-card:hover {
+  transform: translateY(-1px);
+  border-color: var(--surface-border-bright);
+}
+
+/* Table Pagination Styling */
+.pagination-container {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  background: rgba(14, 14, 25, 0.75);
+  border-top: 1px solid var(--surface-border);
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.pagination-info {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.pagination-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pagination-btn {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--surface-border);
+  color: var(--text-secondary);
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 34px;
+  height: 34px;
+}
+
+.pagination-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+  color: white;
+  border-color: var(--surface-border-bright);
+}
+
+.pagination-btn.active {
+  background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%);
+  color: white;
+  font-weight: 700;
+  border-color: transparent;
+  box-shadow: 0 2px 8px var(--primary-glow);
+}
+
+.pagination-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.pagination-select {
+  background: rgba(9, 9, 14, 0.8);
+  border: 1px solid var(--surface-border);
+  color: var(--text-primary);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  outline: none;
 }

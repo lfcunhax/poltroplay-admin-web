@@ -142,9 +142,14 @@ function BaserowSync() {
   const [searchTerm, setSearchTerm] = useState('');
   const [expandedSeries, setExpandedSeries] = useState({});
 
-  // Terminal de Logs ao Vivo
+  // Terminal de Logs ao Vivo (com scroll interno isolado)
   const [liveLogs, setLiveLogs] = useState([]);
-  const terminalBottomRef = useRef(null);
+  const terminalBoxRef = useRef(null);
+  const [autoScrollTerminal, setAutoScrollTerminal] = useState(true);
+
+  // Paginação Inteligente para Grandes Listas
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(25);
 
   // Modal de resultado
   const [syncModal, setSyncModal] = useState(null);
@@ -161,10 +166,15 @@ function BaserowSync() {
   }, []);
 
   useEffect(() => {
-    if (terminalBottomRef.current) {
-      terminalBottomRef.current.scrollIntoView({ behavior: 'smooth' });
+    if (terminalBoxRef.current && autoScrollTerminal) {
+      terminalBoxRef.current.scrollTop = terminalBoxRef.current.scrollHeight;
     }
-  }, [liveLogs]);
+  }, [liveLogs, autoScrollTerminal]);
+
+  // Reseta paginação ao alterar filtros ou busca
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filterMode, searchTerm, syncType, items]);
 
   const addLog = (message, type = 'info') => {
     const now = new Date();
@@ -660,6 +670,12 @@ function BaserowSync() {
     return true;
   });
 
+  // Cálculos de Paginação
+  const totalPages = Math.max(1, Math.ceil(filteredItems.length / itemsPerPage));
+  const validCurrentPage = Math.min(Math.max(1, currentPage), totalPages);
+  const startIndex = (validCurrentPage - 1) * itemsPerPage;
+  const paginatedItems = filteredItems.slice(startIndex, startIndex + itemsPerPage);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '28px' }}>
       
@@ -840,21 +856,53 @@ function BaserowSync() {
         </div>
       )}
 
-      {/* --- TERMINAL DE LOGS AO VIVO --- */}
+      {/* --- TERMINAL DE LOGS AO VIVO (COM CONTROLES E SEM SCROLL NA JANELA) --- */}
       {liveLogs.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
               <Terminal size={16} style={{ color: 'var(--accent)' }} />
               <span>Processo ao Vivo (Live Terminal)</span>
               <span className="pulse-indicator" style={{ backgroundColor: isLoading ? '#00D4FF' : '#10B981' }}></span>
             </div>
-            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-              {liveLogs.length} eventos registrados
-            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <button
+                type="button"
+                onClick={() => setAutoScrollTerminal(!autoScrollTerminal)}
+                style={{
+                  fontSize: '0.75rem',
+                  padding: '3px 9px',
+                  borderRadius: '6px',
+                  background: autoScrollTerminal ? 'rgba(0, 212, 255, 0.12)' : 'rgba(255, 255, 255, 0.05)',
+                  color: autoScrollTerminal ? 'var(--accent)' : 'var(--text-muted)',
+                  border: '1px solid var(--surface-border)'
+                }}
+                title="Ativar/desativar rolagem automática para novas mensagens"
+              >
+                {autoScrollTerminal ? '● Auto-scroll Ativo' : '○ Auto-scroll Pausado'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setLiveLogs([])}
+                style={{
+                  fontSize: '0.75rem',
+                  padding: '3px 9px',
+                  borderRadius: '6px',
+                  background: 'rgba(255, 255, 255, 0.05)',
+                  color: 'var(--text-muted)',
+                  border: '1px solid var(--surface-border)'
+                }}
+                title="Limpar mensagens do terminal"
+              >
+                Limpar
+              </button>
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                {liveLogs.length} eventos registrados
+              </span>
+            </div>
           </div>
 
-          <div className="live-terminal">
+          <div className="live-terminal" ref={terminalBoxRef}>
             {liveLogs.map((log, idx) => (
               <div key={idx} className="terminal-line">
                 <span className="terminal-time">[{log.time}]</span>
@@ -864,7 +912,6 @@ function BaserowSync() {
                 <span>{log.text}</span>
               </div>
             ))}
-            <div ref={terminalBottomRef} />
           </div>
         </div>
       )}
@@ -947,7 +994,7 @@ function BaserowSync() {
                 </tr>
               </thead>
               <tbody>
-                {filteredItems.slice(0, 150).map((item, idx) => {
+                {paginatedItems.map((item, idx) => {
                   const isExpanded = expandedSeries[item.id];
 
                   return (
@@ -1073,11 +1120,95 @@ function BaserowSync() {
               </tbody>
             </table>
 
-            {filteredItems.length > 150 && (
-              <div style={{ textAlign: 'center', padding: '16px', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-                Exibindo os primeiros 150 de {filteredItems.length} itens. Use a busca acima para filtrar.
+          </div>
+
+          {/* --- BARRA DE PAGINAÇÃO COMPLETA E ELEGANTE --- */}
+          <div className="pagination-container" style={{ marginTop: '12px', borderRadius: '12px' }}>
+            <div className="pagination-info">
+              Mostrando <strong style={{ color: 'var(--text-primary)' }}>{filteredItems.length === 0 ? 0 : startIndex + 1}</strong> até <strong style={{ color: 'var(--text-primary)' }}>{Math.min(startIndex + itemsPerPage, filteredItems.length)}</strong> de <strong style={{ color: 'var(--text-primary)' }}>{filteredItems.length}</strong> {syncType === 'movie' ? 'filmes' : 'séries'}
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                <span>Itens por página:</span>
+                <select
+                  value={itemsPerPage}
+                  onChange={(e) => {
+                    setItemsPerPage(Number(e.target.value));
+                    setCurrentPage(1);
+                  }}
+                  className="pagination-select"
+                >
+                  <option value={15}>15</option>
+                  <option value={25}>25</option>
+                  <option value={50}>50</option>
+                  <option value={100}>100</option>
+                </select>
               </div>
-            )}
+
+              <div className="pagination-controls">
+                <button
+                  type="button"
+                  className="pagination-btn"
+                  onClick={() => setCurrentPage(1)}
+                  disabled={validCurrentPage === 1}
+                  title="Primeira Página"
+                >
+                  &laquo;
+                </button>
+                <button
+                  type="button"
+                  className="pagination-btn"
+                  onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                  disabled={validCurrentPage === 1}
+                  title="Página Anterior"
+                >
+                  &lsaquo;
+                </button>
+
+                {/* Botões de Página com janela inteligente */}
+                {Array.from({ length: totalPages }, (_, i) => i + 1)
+                  .filter(page => {
+                    return page === 1 || page === totalPages || Math.abs(page - validCurrentPage) <= 2;
+                  })
+                  .map((page, idx, arr) => {
+                    const prevPage = arr[idx - 1];
+                    const showEllipsis = prevPage && page - prevPage > 1;
+                    return (
+                      <React.Fragment key={page}>
+                        {showEllipsis && <span style={{ color: 'var(--text-muted)', padding: '0 4px' }}>...</span>}
+                        <button
+                          type="button"
+                          className={`pagination-btn ${page === validCurrentPage ? 'active' : ''}`}
+                          onClick={() => setCurrentPage(page)}
+                        >
+                          {page}
+                        </button>
+                      </React.Fragment>
+                    );
+                  })
+                }
+
+                <button
+                  type="button"
+                  className="pagination-btn"
+                  onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                  disabled={validCurrentPage === totalPages}
+                  title="Próxima Página"
+                >
+                  &rsaquo;
+                </button>
+                <button
+                  type="button"
+                  className="pagination-btn"
+                  onClick={() => setCurrentPage(totalPages)}
+                  disabled={validCurrentPage === totalPages}
+                  title="Última Página"
+                >
+                  &raquo;
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

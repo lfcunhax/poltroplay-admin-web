@@ -1,11 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Link, useLocation } from 'react-router-dom';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, collection, query, limit, getDocs } from 'firebase/firestore';
 import { auth, db } from './firebase';
-import { LayoutDashboard, Film, Tv, Users, Bell, LogOut, Cloud, Tag, Menu, ChevronLeft, Megaphone, Settings, CloudDownload, Database } from 'lucide-react';
+import axios from 'axios';
+import { 
+  LayoutDashboard, Film, Tv, Users, Bell, LogOut, Tag, Menu, 
+  ChevronLeft, Megaphone, Settings, CloudDownload, Database, Server
+} from 'lucide-react';
 
-// Placeholders for screens
+// Screens
 import Login from './screens/Login';
 import Dashboard from './screens/Dashboard';
 import MoviesAdmin from './screens/MoviesAdmin';
@@ -21,6 +25,107 @@ import PrivacyPolicy from './screens/PrivacyPolicy';
 import TermsOfService from './screens/TermsOfService';
 import AboutPage from './screens/AboutPage';
 
+function SystemStatusCards() {
+  const [pgOnline, setPgOnline] = useState(true);
+  const [firestoreOnline, setFirestoreOnline] = useState(true);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const checkConnections = async () => {
+      // 1. Check PostgreSQL Series API
+      try {
+        const res = await axios.get('https://series.leflow.com.br/series?limit=1', { timeout: 6000 });
+        if (isMounted) setPgOnline(res.status === 200);
+      } catch (err) {
+        if (isMounted) setPgOnline(false);
+      }
+
+      // 2. Check Firestore
+      try {
+        await getDocs(query(collection(db, 'movies'), limit(1)));
+        if (isMounted) setFirestoreOnline(true);
+      } catch (err) {
+        if (isMounted) setFirestoreOnline(false);
+      }
+    };
+
+    checkConnections();
+    const interval = setInterval(checkConnections, 45000);
+
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, []);
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+      {/* PostgreSQL Status Card */}
+      <div 
+        className={`db-status-card ${pgOnline ? 'online' : 'offline'}`}
+        title={`PostgreSQL Séries: ${pgOnline ? 'Conexão ativa e operando normalmente' : 'Sem resposta no momento'}`}
+      >
+        <div style={{
+          width: '30px',
+          height: '30px',
+          borderRadius: '9px',
+          background: pgOnline ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: pgOnline ? '#10B981' : '#EF4444',
+          flexShrink: 0
+        }}>
+          <Server size={16} />
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1px' }}>
+          <span style={{ fontSize: '0.8rem', color: 'var(--text-primary)', fontWeight: 600, letterSpacing: '-0.01em' }}>
+            PostgreSQL Séries
+          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span className={pgOnline ? 'status-dot-online' : 'status-dot-offline'}></span>
+            <span style={{ fontSize: '0.72rem', fontWeight: 600, color: pgOnline ? '#10B981' : '#EF4444' }}>
+              {pgOnline ? 'Online' : 'Offline'}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* Firestore Status Card */}
+      <div 
+        className={`db-status-card ${firestoreOnline ? 'online' : 'offline'}`}
+        title={`Firestore Filmes: ${firestoreOnline ? 'Conexão ativa e operando normalmente' : 'Sem resposta no momento'}`}
+      >
+        <div style={{
+          width: '30px',
+          height: '30px',
+          borderRadius: '9px',
+          background: firestoreOnline ? 'rgba(0, 212, 255, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: firestoreOnline ? '#00D4FF' : '#EF4444',
+          flexShrink: 0
+        }}>
+          <Database size={16} />
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1px' }}>
+          <span style={{ fontSize: '0.8rem', color: 'var(--text-primary)', fontWeight: 600, letterSpacing: '-0.01em' }}>
+            Firestore Filmes
+          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span className={firestoreOnline ? 'status-dot-online' : 'status-dot-offline'}></span>
+            <span style={{ fontSize: '0.72rem', fontWeight: 600, color: firestoreOnline ? '#00D4FF' : '#EF4444' }}>
+              {firestoreOnline ? 'Conectado' : 'Offline'}
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function PrivateRoute({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -30,18 +135,15 @@ function PrivateRoute({ children }) {
       if (currentUser) {
         try {
           const userDocRef = doc(db, 'users', currentUser.uid);
-          const userDocSnap = await getDoc(userDocRef);
-          
-          if (userDocSnap.exists() && userDocSnap.data().role === 'admin') {
+          const userDoc = await getDoc(userDocRef);
+          if (userDoc.exists() && userDoc.data().role === 'admin') {
             setUser(currentUser);
           } else {
-            // Se existir mas não for admin, desloga
-            await signOut(auth);
+            console.warn('Acesso negado: Usuário não é admin.');
             setUser(null);
           }
         } catch (error) {
-          console.error("Erro ao verificar admin:", error);
-          await signOut(auth);
+          console.error('Erro ao verificar perfil admin:', error);
           setUser(null);
         }
       } else {
@@ -49,11 +151,19 @@ function PrivateRoute({ children }) {
       }
       setLoading(false);
     });
-    return unsubscribe;
+
+    return () => unsubscribe();
   }, []);
 
   if (loading) {
-    return <div className="app-container" style={{ alignItems: 'center', justifyContent: 'center' }}>Carregando Acesso...</div>;
+    return (
+      <div className="app-container" style={{ alignItems: 'center', justifyContent: 'center', height: '100vh' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', color: 'var(--text-secondary)' }}>
+          <div className="status-dot-online"></div>
+          <span>Carregando Acesso PoltroPlay...</span>
+        </div>
+      </div>
+    );
   }
 
   if (!user) {
@@ -68,7 +178,7 @@ function AdminLayout({ children }) {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
   const handleLogout = () => {
-    auth.signOut();
+    signOut(auth);
   };
 
   const menuItems = [
@@ -86,13 +196,15 @@ function AdminLayout({ children }) {
 
   return (
     <div className="app-container">
-      <div className={`sidebar ${isSidebarCollapsed ? 'collapsed' : ''}`}>
+      {/* Sidebar travada e fixa */}
+      <aside className={`sidebar ${isSidebarCollapsed ? 'collapsed' : ''}`}>
         <div style={{ 
           padding: '24px', 
           borderBottom: '1px solid rgba(255,255,255,0.05)',
           display: 'flex',
           alignItems: 'center',
-          justifyContent: isSidebarCollapsed ? 'center' : 'space-between'
+          justifyContent: isSidebarCollapsed ? 'center' : 'space-between',
+          flexShrink: 0
         }}>
           {!isSidebarCollapsed && (
             <div>
@@ -100,39 +212,46 @@ function AdminLayout({ children }) {
                 background: 'linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%)',
                 WebkitBackgroundClip: 'text',
                 WebkitTextFillColor: 'transparent',
-                margin: 0
+                margin: 0,
+                fontSize: '1.4rem',
+                letterSpacing: '-0.02em'
               }}>
                 PoltroPlay
               </h2>
-              <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Painel Administrativo</span>
+              <span style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                Painel Administrativo
+              </span>
             </div>
           )}
           <button 
             onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-            style={{ color: 'var(--text-secondary)', padding: '4px' }}
+            style={{ color: 'var(--text-secondary)', padding: '6px', borderRadius: '8px', display: 'flex', alignItems: 'center' }}
+            title={isSidebarCollapsed ? 'Expandir Menu' : 'Recolher Menu'}
           >
-            {isSidebarCollapsed ? <Menu size={24} /> : <ChevronLeft size={24} />}
+            {isSidebarCollapsed ? <Menu size={20} /> : <ChevronLeft size={20} />}
           </button>
         </div>
         
-        <nav style={{ flex: 1, padding: '16px 0' }}>
+        <nav style={{ flex: 1, padding: '16px 0', overflowY: 'auto' }}>
           <ul style={{ listStyle: 'none' }}>
             {menuItems.map(item => {
               const isActive = location.pathname === item.path;
               return (
-                <li key={item.path}>
+                <li key={item.path} style={{ margin: '3px 0' }}>
                   <Link 
                     to={item.path} 
                     style={{
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: isSidebarCollapsed ? 'center' : 'flex-start',
-                      gap: '12px',
-                      padding: '12px 24px',
+                      gap: '14px',
+                      padding: '11px 24px',
                       color: isActive ? 'var(--accent)' : 'var(--text-secondary)',
-                      backgroundColor: isActive ? 'rgba(0, 212, 255, 0.1)' : 'transparent',
+                      backgroundColor: isActive ? 'rgba(0, 212, 255, 0.08)' : 'transparent',
                       borderRight: isActive ? '3px solid var(--accent)' : '3px solid transparent',
                       fontWeight: isActive ? '600' : '400',
+                      fontSize: '0.92rem',
+                      textDecoration: 'none',
                       transition: 'all 0.2s',
                     }}
                     title={isSidebarCollapsed ? item.name : ''}
@@ -146,7 +265,7 @@ function AdminLayout({ children }) {
           </ul>
         </nav>
 
-        <div style={{ padding: '16px', display: 'flex', justifyContent: 'center' }}>
+        <div style={{ padding: '16px', borderTop: '1px solid rgba(255,255,255,0.05)', flexShrink: 0 }}>
           <button 
             onClick={handleLogout}
             style={{
@@ -155,37 +274,28 @@ function AdminLayout({ children }) {
               justifyContent: isSidebarCollapsed ? 'center' : 'flex-start',
               gap: '12px',
               width: '100%',
-              padding: '12px',
+              padding: '10px 12px',
               color: 'var(--text-muted)',
-              borderRadius: '12px',
-              transition: 'background 0.2s',
+              borderRadius: '10px',
+              transition: 'all 0.2s',
             }}
             title={isSidebarCollapsed ? "Sair do Painel" : ""}
-            onMouseOver={(e) => { e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.05)'; e.currentTarget.style.color = 'white'; }}
+            onMouseOver={(e) => { e.currentTarget.style.backgroundColor = 'rgba(239, 68, 68, 0.12)'; e.currentTarget.style.color = '#F87171'; }}
             onMouseOut={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = 'var(--text-muted)'; }}
           >
-            <LogOut size={20} />
+            <LogOut size={18} />
             {!isSidebarCollapsed && "Sair do Painel"}
           </button>
         </div>
-      </div>
+      </aside>
 
+      {/* Conteúdo Principal com scroll independente */}
       <div className="main-content">
         <header className="header">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <div className="system-status-pill">
-              <span className="pulse-indicator" style={{ backgroundColor: '#10B981' }}></span>
-              <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>PostgreSQL Séries</span>
-              <span style={{ color: '#10B981', fontSize: '0.75rem', fontWeight: 600 }}>Online</span>
-            </div>
-            <div className="system-status-pill">
-              <span className="pulse-indicator" style={{ backgroundColor: '#00D4FF' }}></span>
-              <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>Firestore Filmes</span>
-              <span style={{ color: '#00D4FF', fontSize: '0.75rem', fontWeight: 600 }}>Conectado</span>
-            </div>
-          </div>
+          {/* Status Cards com bordas suaves e piscando */}
+          <SystemStatusCards />
           
-          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
             <div style={{ 
               width: '40px', 
               height: '40px', 
