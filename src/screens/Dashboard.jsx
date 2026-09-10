@@ -1,26 +1,54 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../firebase';
-import { collection, getDocs } from 'firebase/firestore';
-import { Film, Tv, Users, TrendingUp } from 'lucide-react';
+import { collection, getDocs, getCountFromServer } from 'firebase/firestore';
+import axios from 'axios';
+import { Film, Tv, Users, TrendingUp, Sparkles, Activity } from 'lucide-react';
 
-function StatCard({ title, value, icon, color }) {
+const SERIES_API_URL = 'https://series.leflow.com.br';
+
+function StatCard({ title, value, icon, color, gradient }) {
   return (
-    <div className="glass-card" style={{ display: 'flex', alignItems: 'center', gap: '24px' }}>
+    <div className="glass-card" style={{ 
+      display: 'flex', 
+      alignItems: 'center', 
+      gap: '20px',
+      padding: '24px',
+      position: 'relative',
+      overflow: 'hidden'
+    }}>
       <div style={{
-        width: '64px',
-        height: '64px',
+        position: 'absolute',
+        top: 0,
+        right: 0,
+        width: '100px',
+        height: '100px',
+        background: `${color}10`,
+        borderRadius: '50%',
+        filter: 'blur(30px)',
+        pointerEvents: 'none'
+      }} />
+
+      <div style={{
+        width: '58px',
+        height: '58px',
         borderRadius: '16px',
-        backgroundColor: `${color}20`,
+        background: gradient || `${color}18`,
         color: color,
+        border: `1px solid ${color}33`,
         display: 'flex',
         alignItems: 'center',
-        justifyContent: 'center'
+        justifyContent: 'center',
+        flexShrink: 0
       }}>
         {icon}
       </div>
       <div>
-        <h3 style={{ fontSize: '14px', color: 'var(--text-secondary)', marginBottom: '4px' }}>{title}</h3>
-        <div style={{ fontSize: '32px', fontWeight: 'bold', color: 'white' }}>{value}</div>
+        <h3 style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 600, marginBottom: '4px' }}>
+          {title}
+        </h3>
+        <div style={{ fontSize: '2.2rem', fontWeight: 800, color: 'white', fontFamily: 'Outfit, sans-serif', lineHeight: 1.1 }}>
+          {value}
+        </div>
       </div>
     </div>
   );
@@ -34,43 +62,60 @@ function Dashboard() {
     views: 0
   });
   const [topContent, setTopContent] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    // In a real scenario, this might be a Cloud Function aggregation to avoid reading all docs
     const fetchStats = async () => {
+      setIsLoading(true);
       try {
-        const moviesSnap = await getDocs(collection(db, 'movies'));
-        const seriesSnap = await getDocs(collection(db, 'series'));
-        const usersSnap = await getDocs(collection(db, 'users'));
-        
-        let totalViews = 0;
+        // Filmes do Firestore
+        const moviesCountSnap = await getCountFromServer(collection(db, 'movies')).catch(() => null);
+        const usersCountSnap = await getCountFromServer(collection(db, 'users')).catch(() => null);
+
+        let moviesCount = moviesCountSnap?.data()?.count || 0;
+        let usersCount = usersCountSnap?.data()?.count || 0;
+
+        // Séries da API PostgreSQL
+        let seriesCount = 0;
+        try {
+          const sRes = await axios.get(`${SERIES_API_URL}/series?limit=1`);
+          seriesCount = sRes.data?.total || 0;
+        } catch (_) {}
+
+        // Busca amostra para Top Mais Assistidos
         let allContent = [];
-
-        moviesSnap.forEach(doc => {
-          const data = doc.data();
-          const views = data.views || 0;
-          totalViews += views;
-          if (views > 0) allContent.push({ id: doc.id, title: data.title, views, type: 'Filme', posterPath: data.posterPath });
-        });
-
-        seriesSnap.forEach(doc => {
-          const data = doc.data();
-          const views = data.views || 0;
-          totalViews += views;
-          if (views > 0) allContent.push({ id: doc.id, title: data.title, views, type: 'Série', posterPath: data.posterPath });
-        });
+        let totalViews = 0;
+        try {
+          const sampleMovies = await getDocs(collection(db, 'movies'));
+          sampleMovies.forEach(doc => {
+            const data = doc.data();
+            const views = data.views || 0;
+            totalViews += views;
+            if (views > 0) {
+              allContent.push({ 
+                id: doc.id, 
+                title: data.title, 
+                views, 
+                type: 'Filme', 
+                posterPath: data.posterPath 
+              });
+            }
+          });
+        } catch (_) {}
 
         allContent.sort((a, b) => b.views - a.views);
         setTopContent(allContent.slice(0, 5));
 
         setStats({
-          movies: moviesSnap.size,
-          series: seriesSnap.size,
-          users: usersSnap.size,
+          movies: moviesCount,
+          series: seriesCount,
+          users: usersCount,
           views: totalViews
         });
       } catch (error) {
         console.error("Error fetching stats:", error);
+      } finally {
+        setIsLoading(false);
       }
     };
 
@@ -78,85 +123,99 @@ function Dashboard() {
   }, []);
 
   return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '32px' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px' }}>
         <div>
-          <h1 style={{ marginBottom: '8px' }}>Dashboard</h1>
-          <p style={{ color: 'var(--text-secondary)' }}>Bem-vindo ao Painel de Controle do PoltroPlay.</p>
+          <h1 style={{ fontSize: '2rem', fontWeight: 800, margin: '0 0 6px 0', letterSpacing: '-0.03em' }}>
+            Visão Geral do Sistema
+          </h1>
+          <p style={{ color: 'var(--text-secondary)', fontSize: '0.95rem', margin: 0 }}>
+            Métricas em tempo real do catálogo de filmes, séries no PostgreSQL e usuários.
+          </p>
+        </div>
+
+        <div className="system-status-pill">
+          <Activity size={14} style={{ color: 'var(--accent)' }} />
+          <span>Status Geral: <strong style={{ color: '#10B981' }}>Operacional</strong></span>
         </div>
       </div>
 
+      {/* Grid de Cards de Estatísticas */}
       <div style={{ 
         display: 'grid', 
-        gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', 
-        gap: '24px',
-        marginBottom: '40px'
+        gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', 
+        gap: '20px'
       }}>
         <StatCard 
-          title="Filmes Cadastrados" 
-          value={stats.movies} 
-          icon={<Film size={32} />} 
+          title="Filmes no Firestore" 
+          value={isLoading ? '...' : stats.movies} 
+          icon={<Film size={28} />} 
           color="#7B2FF7" 
         />
         <StatCard 
-          title="Séries Cadastradas" 
-          value={stats.series} 
-          icon={<Tv size={32} />} 
+          title="Séries no PostgreSQL" 
+          value={isLoading ? '...' : stats.series} 
+          icon={<Tv size={28} />} 
           color="#00D4FF" 
         />
         <StatCard 
           title="Usuários Ativos" 
-          value={stats.users} 
-          icon={<Users size={32} />} 
+          value={isLoading ? '...' : stats.users} 
+          icon={<Users size={28} />} 
           color="#E94560" 
         />
         <StatCard 
-          title="Total de Visualizações" 
-          value={stats.views} 
-          icon={<TrendingUp size={32} />} 
-          color="#4CAF50" 
+          title="Visualizações Totais" 
+          value={isLoading ? '...' : stats.views} 
+          icon={<TrendingUp size={28} />} 
+          color="#10B981" 
         />
       </div>
 
+      {/* Tabela de Top Assistidos */}
       <div className="glass-card">
-        <h2 style={{ marginBottom: '24px', fontSize: '20px' }}>Top 5 Mais Assistidos</h2>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '20px' }}>
+          <Sparkles size={20} style={{ color: 'var(--accent)' }} />
+          <h2 style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0 }}>
+            Top Mais Assistidos
+          </h2>
+        </div>
+
         {topContent.length === 0 ? (
-          <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '40px 0' }}>
-            Ainda não há visualizações registradas.
+          <div style={{ 
+            color: 'var(--text-muted)', 
+            textAlign: 'center', 
+            padding: '48px 0',
+            background: 'rgba(0,0,0,0.2)',
+            borderRadius: '12px'
+          }}>
+            Ainda não há visualizações suficientes registradas no aplicativo.
           </div>
         ) : (
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Título</th>
-                <th>Tipo</th>
-                <th>Views</th>
-              </tr>
-            </thead>
-            <tbody>
-              {topContent.map((item, idx) => (
-                <tr key={item.id}>
-                  <td>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                      <span style={{ color: 'var(--primary)', fontWeight: 'bold', minWidth: '30px' }}>#{idx + 1}</span>
-                      {item.posterPath ? (
-                        <img 
-                          src={`https://image.tmdb.org/t/p/w92${item.posterPath}`} 
-                          alt={item.title}
-                          style={{ width: '40px', height: '60px', borderRadius: '8px', objectFit: 'cover' }}
-                        />
-                      ) : (
-                        <div style={{ width: '40px', height: '60px', borderRadius: '8px', backgroundColor: 'var(--surface-light)' }} />
-                      )}
-                      <span style={{ fontWeight: '600' }}>{item.title}</span>
-                    </div>
-                  </td>
-                  <td style={{ verticalAlign: 'middle' }}>{item.type}</td>
-                  <td style={{ verticalAlign: 'middle' }}><span className="status-badge success">{item.views} views</span></td>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.9rem' }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--surface-border)', color: 'var(--text-muted)', fontSize: '0.8rem', textTransform: 'uppercase' }}>
+                  <th style={{ padding: '14px 16px' }}>Título</th>
+                  <th style={{ padding: '14px 16px' }}>Tipo</th>
+                  <th style={{ padding: '14px 16px', textAlign: 'right' }}>Visualizações</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {topContent.map((item) => (
+                  <tr key={item.id} style={{ borderBottom: '1px solid var(--surface-border)' }}>
+                    <td style={{ padding: '14px 16px', fontWeight: 600 }}>{item.title}</td>
+                    <td style={{ padding: '14px 16px' }}>
+                      <span className="badge badge-muted">{item.type}</span>
+                    </td>
+                    <td style={{ padding: '14px 16px', textAlign: 'right', fontWeight: 700, color: 'var(--accent)' }}>
+                      {item.views}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </div>

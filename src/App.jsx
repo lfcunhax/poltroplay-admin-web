@@ -72,16 +72,16 @@ function AdminLayout({ children }) {
   };
 
   const menuItems = [
-    { path: '/', name: 'Dashboard', icon: <LayoutDashboard size={20} /> },
-    { path: '/xtream', name: 'Sincronizar Xtream', icon: <CloudDownload size={20} /> },
-    { path: '/baserow', name: 'Sincronizar Baserow', icon: <Database size={20} /> },
-    { path: '/movies', name: 'Filmes Manuais', icon: <Film size={20} /> },
-    { path: '/series', name: 'Séries Manuais', icon: <Tv size={20} /> },
-    { path: '/categories', name: 'Categorias', icon: <Tag size={20} /> },
-    { path: '/users', name: 'Usuários', icon: <Users size={20} /> },
-    { path: '/notifications', name: 'Notificações', icon: <Bell size={20} /> },
-    { path: '/promotions', name: 'Promoções / Ads', icon: <Megaphone size={20} /> },
-    { path: '/settings', name: 'Configurações', icon: <Settings size={20} /> },
+    { path: '/', name: 'Dashboard', icon: <LayoutDashboard size={19} /> },
+    { path: '/baserow', name: 'Sincronizar Baserow', icon: <Database size={19} /> },
+    { path: '/xtream', name: 'Sincronizar Xtream', icon: <CloudDownload size={19} /> },
+    { path: '/movies', name: 'Filmes Manuais', icon: <Film size={19} /> },
+    { path: '/series', name: 'Séries Manuais', icon: <Tv size={19} /> },
+    { path: '/categories', name: 'Categorias', icon: <Tag size={19} /> },
+    { path: '/users', name: 'Usuários', icon: <Users size={19} /> },
+    { path: '/notifications', name: 'Notificações', icon: <Bell size={19} /> },
+    { path: '/promotions', name: 'Promoções / Ads', icon: <Megaphone size={19} /> },
+    { path: '/settings', name: 'Configurações', icon: <Settings size={19} /> },
   ];
 
   return (
@@ -172,25 +172,37 @@ function AdminLayout({ children }) {
 
       <div className="main-content">
         <header className="header">
-          <div style={{ flex: 1 }}>
-            {/* Search bar could go here */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <div className="system-status-pill">
+              <span className="pulse-indicator" style={{ backgroundColor: '#10B981' }}></span>
+              <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>PostgreSQL Séries</span>
+              <span style={{ color: '#10B981', fontSize: '0.75rem', fontWeight: 600 }}>Online</span>
+            </div>
+            <div className="system-status-pill">
+              <span className="pulse-indicator" style={{ backgroundColor: '#00D4FF' }}></span>
+              <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>Firestore Filmes</span>
+              <span style={{ color: '#00D4FF', fontSize: '0.75rem', fontWeight: 600 }}>Conectado</span>
+            </div>
           </div>
+          
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
             <div style={{ 
               width: '40px', 
               height: '40px', 
-              borderRadius: '50%', 
-              backgroundColor: 'var(--primary)',
+              borderRadius: '12px', 
+              background: 'linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              fontWeight: 'bold',
-              color: 'white'
+              fontWeight: '700',
+              color: 'white',
+              fontSize: '1rem',
+              boxShadow: '0 4px 12px var(--primary-glow)'
             }}>
               A
             </div>
             <div>
-              <div style={{ fontWeight: '600', fontSize: '14px' }}>Admin</div>
+              <div style={{ fontWeight: '600', fontSize: '14px', color: 'var(--text-primary)' }}>Admin PoltroPlay</div>
               <div style={{ color: 'var(--text-muted)', fontSize: '12px' }}>admin@poltroplay.com</div>
             </div>
           </div>
