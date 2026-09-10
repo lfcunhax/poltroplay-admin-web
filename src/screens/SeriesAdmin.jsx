@@ -1,652 +1,498 @@
 import React, { useState, useEffect } from 'react';
-import { db } from '../firebase';
-import { 
-  collection, getDocs, addDoc, serverTimestamp, deleteDoc, doc, 
-  query, where, updateDoc, getCountFromServer, limit, startAfter, orderBy, writeBatch, collectionGroup
-} from 'firebase/firestore';
 import axios from 'axios';
-import { Plus, Search, Trash2, ListVideo, Edit2, Star, Tv, ChevronLeft, ChevronRight } from 'lucide-react';
-import SeriesEpisodesManager from '../components/SeriesEpisodesManager';
+import { 
+  Tv, Plus, Search, Trash2, Edit2, PlayCircle, Star, 
+  ChevronLeft, ChevronRight, RefreshCw, X, Layers, ExternalLink 
+} from 'lucide-react';
 
+const SERIES_API_URL = 'https://series.leflow.com.br';
+const ADMIN_SECRET = 'poltroplay_admin_2026';
 const TMDB_API_KEY = '384caf4e90af984a7c5595ea5d9bb386';
 const PAGE_SIZE = 20;
 
 function SeriesAdmin() {
   const [series, setSeries] = useState([]);
-  const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
-  
-  // Paginação e Contadores
   const [totalSeries, setTotalSeries] = useState(0);
-  const [page, setPage] = useState(1);
-  const [pageHistory, setPageHistory] = useState([null]);
-  const [hasMore, setHasMore] = useState(false);
-  
-  // Navigation State
-  const [selectedSeries, setSelectedSeries] = useState(null);
-  
-  // Modals state
-  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [searchTerm, setSearchTerm] = useState('');
 
-  // Add Form state
-  const [tmdbId, setTmdbId] = useState('');
-  const [preview, setPreview] = useState(null);
-  const [tags, setTags] = useState([]);
-  const [isHighlightAdd, setIsHighlightAdd] = useState(false);
-  const [isNewRelease, setIsNewRelease] = useState(true);
-  const [isSearching, setIsSearching] = useState(false);
+  // Episódios Modal
+  const [selectedSeries, setSelectedSeries] = useState(null);
+  const [episodes, setEpisodes] = useState([]);
+  const [loadingEpisodes, setLoadingEpisodes] = useState(false);
+
+  // Nova Série Modal
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [tmdbIdInput, setTmdbIdInput] = useState('');
+  const [tmdbPreview, setTmdbPreview] = useState(null);
+  const [isSearchingTmdb, setIsSearchingTmdb] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
-  // Edit Form state
-  const [editingId, setEditingId] = useState(null);
-  const [editForm, setEditForm] = useState({
-    title: '', overview: '', tags: [], isHighlight: false, posterPath: ''
-  });
-
   useEffect(() => {
-    fetchTotalCount();
-    fetchSeries(null);
-    fetchCategories();
+    fetchSeries(1, searchTerm);
   }, []);
 
-  const fetchTotalCount = async () => {
-    try {
-      const coll = collection(db, 'series');
-      const snapshot = await getCountFromServer(coll);
-      setTotalSeries(snapshot.data().count);
-    } catch (e) {
-      console.error("Erro ao buscar total:", e);
-    }
-  };
-
-  const fetchSeries = async (startAfterDoc) => {
+  const fetchSeries = async (page = 1, search = '') => {
     setLoading(true);
     try {
-      let q = query(
-        collection(db, 'series'),
-        orderBy('createdAt', 'desc'),
-        limit(PAGE_SIZE)
-      );
-
-      if (startAfterDoc) {
-        q = query(q, startAfter(startAfterDoc));
-      }
-
-      const querySnapshot = await getDocs(q);
-      const seriesList = querySnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-      
-      setSeries(seriesList);
-
-      if (querySnapshot.docs.length === PAGE_SIZE) {
-        const lastDoc = querySnapshot.docs[querySnapshot.docs.length - 1];
-        setHasMore(true);
-        if (pageHistory.length === page) {
-          setPageHistory([...pageHistory, lastDoc]);
-        }
-      } else {
-        setHasMore(false);
-      }
-    } catch (error) {
-      console.error("Error fetching series: ", error);
+      const url = `${SERIES_API_URL}/series?page=${page}&limit=${PAGE_SIZE}${search.trim() ? `&search=${encodeURIComponent(search.trim())}` : ''}`;
+      const res = await axios.get(url);
+      const data = res.data || {};
+      setSeries(data.series || []);
+      setTotalSeries(data.total || 0);
+      setCurrentPage(data.page || 1);
+      setTotalPages(data.totalPages || 1);
+    } catch (err) {
+      console.error("Erro ao buscar séries:", err);
     } finally {
       setLoading(false);
     }
   };
 
-  const goToNextPage = () => {
-    if (!hasMore) return;
-    const currentCursor = pageHistory[page];
-    setPage(page + 1);
-    fetchSeries(currentCursor);
+  const handleSearchSubmit = (e) => {
+    e.preventDefault();
+    fetchSeries(1, searchTerm);
   };
 
-  const goToPrevPage = () => {
-    if (page <= 1) return;
-    const prevPage = page - 1;
-    setPage(prevPage);
-    const cursor = prevPage === 1 ? null : pageHistory[prevPage - 1];
-    fetchSeries(cursor);
-  };
+  const handleDelete = async (id, title) => {
+    if (!window.confirm(`Tem certeza que deseja excluir permanentemente a série "${title}" do PostgreSQL?\nIsso também removerá todos os seus episódios.`)) {
+      return;
+    }
 
-  const fetchCategories = async () => {
     try {
-      const snap = await getDocs(collection(db, 'categories'));
-      const cats = snap.docs.map(doc => doc.data().name);
-      setCategories(cats.sort());
-    } catch (error) {
-      console.error("Error fetching categories: ", error);
+      await axios.delete(`${SERIES_API_URL}/series/${id}`, {
+        headers: { 'x-admin-secret': ADMIN_SECRET }
+      });
+      alert(`Série "${title}" removida com sucesso.`);
+      fetchSeries(currentPage, searchTerm);
+    } catch (err) {
+      console.error("Erro ao deletar série:", err);
+      alert("Erro ao excluir série: " + err.message);
+    }
+  };
+
+  const handleViewEpisodes = async (s) => {
+    setSelectedSeries(s);
+    setLoadingEpisodes(true);
+    setEpisodes([]);
+    try {
+      const res = await axios.get(`${SERIES_API_URL}/series/${s.id}/episodes`);
+      setEpisodes(res.data || []);
+    } catch (err) {
+      console.error("Erro ao buscar episódios:", err);
+    } finally {
+      setLoadingEpisodes(false);
     }
   };
 
   const searchTmdb = async () => {
-    if (!tmdbId) return;
-    setIsSearching(true);
+    if (!tmdbIdInput.trim()) return;
+    setIsSearchingTmdb(true);
+    setTmdbPreview(null);
     try {
-      const response = await axios.get(`https://api.themoviedb.org/3/tv/${tmdbId}?api_key=${TMDB_API_KEY}&language=pt-BR`);
-      setPreview(response.data);
-      
-      const genreMap = {
-        10759: 'Ação e Aventura', 16: 'Animação', 35: 'Comédia', 80: 'Crime',
-        99: 'Documentário', 18: 'Drama', 10751: 'Família', 10762: 'Kids',
-        9648: 'Mistério', 10763: 'News', 10764: 'Reality', 10765: 'Sci-Fi e Fantasy',
-        10766: 'Soap', 10767: 'Talk', 10768: 'War & Politics', 37: 'Faroeste'
-      };
-      const tmdbData = response.data;
-      const genreNames = tmdbData.genres 
-        ? tmdbData.genres.map(g => g.name)
-        : (tmdbData.genre_ids || []).map(id => genreMap[id]);
-      const validGenreNames = genreNames.filter(name => name);
-      const relYear = tmdbData.first_air_date ? parseInt(tmdbData.first_air_date.split('-')[0]) : 0; 
-      const isRecent = relYear >= new Date().getFullYear() - 1; 
-      setTags([...new Set([...(isRecent ? ['recent'] : []), ...validGenreNames])]);
-
-    } catch (error) {
-      alert("Série não encontrada no TMDB. Verifique o ID.");
-      setPreview(null);
+      const res = await axios.get(`https://api.themoviedb.org/3/tv/${tmdbIdInput.trim()}?api_key=${TMDB_API_KEY}&language=pt-BR`);
+      setTmdbPreview(res.data);
+    } catch (err) {
+      alert("Série não encontrada no TMDB com este ID.");
     } finally {
-      setIsSearching(false);
+      setIsSearchingTmdb(false);
     }
   };
 
-  const handleSaveSeries = async () => {
-    if (!preview) {
-      alert("Por favor, importe uma série.");
-      return;
-    }
+  const handleSaveNewSeries = async () => {
+    if (!tmdbPreview) return;
     setIsSaving(true);
     try {
-      const q = query(collection(db, 'series'), where('tmdbId', '==', preview.id));
-      const querySnapshot = await getDocs(q);
-      if (!querySnapshot.empty) {
-        alert("Esta série já está cadastrada no banco de dados!");
-        setIsSaving(false);
-        return;
-      }
-
-      const missingCategories = tags.filter(tag => !categories.includes(tag));
-      for (const newCat of missingCategories) {
-        await addDoc(collection(db, 'categories'), {
-          name: newCat,
-          createdAt: serverTimestamp()
-        });
-      }
-
-      const lowerTitle = (preview.name || '').toLowerCase();
-
-      const docRef = await addDoc(collection(db, 'series'), {
-        tmdbId: preview.id || null,
-        title: preview.name || '',
-        titleLower: lowerTitle,
-        overview: preview.overview || '',
-        posterPath: preview.poster_path || null,
-        backdropPath: preview.backdrop_path || null,
-        voteAverage: preview.vote_average || 0,
-        releaseDate: preview.first_air_date || null,
-        numberOfSeasons: preview.number_of_seasons || 0,
-        numberOfEpisodes: preview.number_of_episodes || 0,
-        tags: tags,
-        isHighlight: isHighlightAdd,
-        createdAt: serverTimestamp()
+      const genreNames = (tmdbPreview.genres || []).map(g => g.name);
+      await axios.post(`${SERIES_API_URL}/series`, {
+        tmdbId: tmdbPreview.id,
+        title: tmdbPreview.name,
+        overview: tmdbPreview.overview || '',
+        posterPath: tmdbPreview.poster_path || null,
+        backdropPath: tmdbPreview.backdrop_path || null,
+        voteAverage: tmdbPreview.vote_average || 0,
+        releaseDate: tmdbPreview.first_air_date || null,
+        tags: genreNames,
+        isHighlight: false
+      }, {
+        headers: { 'x-admin-secret': ADMIN_SECRET }
       });
-      
-      if (isNewRelease) {
-        try {
-          const itemTitle = preview.name;
-          const imageUrl = preview.backdrop_path ? `https://image.tmdb.org/t/p/w780${preview.backdrop_path}` : (preview.poster_path ? `https://image.tmdb.org/t/p/w500${preview.poster_path}` : '');
-          
-          await addDoc(collection(db, 'notifications'), {
-            title: `Novo Lançamento: ${itemTitle}`,
-            body: `${itemTitle} já está disponível no PoltroPlay. Venha assistir agora mesmo!`,
-            imageUrl: imageUrl,
-            contentId: docRef.id,
-            contentType: 'tv',
-            createdAt: serverTimestamp(),
-            status: 'sent' 
-          });
-        } catch (e) {
-          console.error("Erro ao enviar notificação de lançamento:", e);
-        }
-      }
 
-      alert("Série cadastrada! Você pode adicionar os links dos episódios em seguida.");
+      alert(`Série "${tmdbPreview.name}" adicionada com sucesso!`);
       setIsAddModalOpen(false);
-      resetAddForm();
-      setPage(1);
-      setPageHistory([null]);
-      fetchTotalCount();
-      fetchSeries(null);
-      fetchCategories();
-    } catch (error) {
-      alert("Erro ao salvar série.");
+      setTmdbIdInput('');
+      setTmdbPreview(null);
+      fetchSeries(1, '');
+    } catch (err) {
+      alert("Erro ao salvar série: " + err.message);
     } finally {
       setIsSaving(false);
     }
   };
-
-  const openEdit = (item) => {
-    setEditingId(item.id);
-    setEditForm({
-      title: item.title || '',
-      overview: item.overview || '',
-      tags: item.tags || [],
-      isHighlight: item.isHighlight || false,
-      posterPath: item.posterPath || ''
-    });
-    setIsEditModalOpen(true);
-  };
-
-  const handleUpdateSeries = async () => {
-    setIsSaving(true);
-    try {
-      const missingCategories = editForm.tags.filter(tag => !categories.includes(tag));
-      for (const newCat of missingCategories) {
-        await addDoc(collection(db, 'categories'), {
-          name: newCat,
-          createdAt: serverTimestamp()
-        });
-      }
-
-      await updateDoc(doc(db, 'series', editingId), {
-        title: editForm.title,
-        titleLower: editForm.title.toLowerCase(),
-        overview: editForm.overview,
-        tags: editForm.tags,
-        isHighlight: editForm.isHighlight
-      });
-      alert("Série atualizada com sucesso!");
-      setIsEditModalOpen(false);
-      const cursor = page === 1 ? null : pageHistory[page - 1];
-      fetchSeries(cursor);
-      fetchCategories();
-    } catch (error) {
-      alert("Erro ao atualizar série.");
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  const handleDelete = async (id) => {
-    if (window.confirm("Tem certeza que deseja excluir esta série e TODOS os seus episódios?")) {
-      setLoading(true);
-      try {
-        // Apaga os episódios primeiro
-        const episodesSnap = await getDocs(collection(db, 'series', id, 'episodes'));
-        const batch = writeBatch(db);
-        episodesSnap.docs.forEach(ep => {
-          batch.delete(ep.ref);
-        });
-        await batch.commit();
-
-        // Apaga a série
-        await deleteDoc(doc(db, 'series', id));
-        fetchTotalCount();
-        const cursor = page === 1 ? null : pageHistory[page - 1];
-        fetchSeries(cursor);
-      } catch (e) {
-        console.error("Erro ao apagar série:", e);
-      } finally {
-        setLoading(false);
-      }
-    }
-  };
-
-  const handleWipeAllSeries = async () => {
-    if (window.confirm("PERIGO! Você tem certeza ABSOLUTA que deseja apagar TODAS as séries e TODOS os episódios do banco de dados? Esta ação não pode ser desfeita.")) {
-      if (window.prompt("Digite 'CONFIRMAR' em maiúsculo para apagar tudo:") === 'CONFIRMAR') {
-        setLoading(true);
-        try {
-          // 1. Apagar TODOS os episódios (usando collectionGroup para pegar até os de séries fantasmas)
-          const episodesQuery = collectionGroup(db, 'episodes');
-          const episodesSnap = await getDocs(episodesQuery);
-          
-          let currentBatch = writeBatch(db);
-          let count = 0;
-          const batches = [];
-          
-          episodesSnap.docs.forEach((doc) => {
-            currentBatch.delete(doc.ref);
-            count++;
-            if (count === 400) {
-              batches.push(currentBatch.commit());
-              currentBatch = writeBatch(db);
-              count = 0;
-            }
-          });
-          if (count > 0) batches.push(currentBatch.commit());
-          await Promise.all(batches);
-          
-          // 2. Apagar todas as Séries (documentos principais)
-          const seriesSnap = await getDocs(collection(db, 'series'));
-          let seriesBatch = writeBatch(db);
-          let sCount = 0;
-          const sBatches = [];
-          
-          seriesSnap.docs.forEach((doc) => {
-            seriesBatch.delete(doc.ref);
-            sCount++;
-            if (sCount === 400) {
-              sBatches.push(seriesBatch.commit());
-              seriesBatch = writeBatch(db);
-              sCount = 0;
-            }
-          });
-          if (sCount > 0) sBatches.push(seriesBatch.commit());
-          await Promise.all(sBatches);
-
-          alert("Limpeza profunda concluída! Todos os fantasmas foram exorcizados.");
-          setPage(1);
-          setPageHistory([null]);
-          fetchTotalCount();
-          fetchSeries(null);
-          setLoading(false);
-        } catch (e) {
-          console.error("Erro ao apagar séries:", e);
-          alert("Ocorreu um erro ao apagar as séries. Veja o console.");
-          setLoading(false);
-        }
-      }
-    }
-  };
-
-  const resetAddForm = () => {
-    setTmdbId('');
-    setPreview(null);
-    setTags([]);
-    setIsHighlightAdd(false);
-    setIsNewRelease(true);
-  };
-
-  const toggleTag = (tag, isEdit = false) => {
-    if (isEdit) {
-      if (editForm.tags.includes(tag)) {
-        setEditForm({ ...editForm, tags: editForm.tags.filter(t => t !== tag) });
-      } else {
-        setEditForm({ ...editForm, tags: [...editForm.tags, tag] });
-      }
-    } else {
-      if (tags.includes(tag)) {
-        setTags(tags.filter(t => t !== tag));
-      } else {
-        setTags([...tags, tag]);
-      }
-    }
-  };
-
-  const renderTagsSelector = (currentTags, isEdit = false) => (
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', padding: '12px', background: 'rgba(0,0,0,0.2)', borderRadius: '8px', border: '1px solid var(--surface-light)' }}>
-      {categories.length === 0 ? <span style={{ color: 'var(--text-muted)' }}>Nenhuma categoria cadastrada.</span> : null}
-      {categories.map(cat => {
-        const isSelected = currentTags.includes(cat);
-        return (
-          <div 
-            key={cat} 
-            onClick={() => toggleTag(cat, isEdit)}
-            style={{
-              padding: '6px 12px', borderRadius: '16px', cursor: 'pointer', fontSize: '12px', fontWeight: '500',
-              backgroundColor: isSelected ? 'var(--primary)' : 'rgba(255,255,255,0.05)',
-              color: isSelected ? 'white' : 'var(--text-secondary)',
-              border: `1px solid ${isSelected ? 'var(--primary-light)' : 'rgba(255,255,255,0.1)'}`,
-              transition: 'all 0.2s'
-            }}
-          >
-            {cat}
-          </div>
-        );
-      })}
-    </div>
-  );
-
-  if (selectedSeries) {
-    return <SeriesEpisodesManager series={selectedSeries} onBack={() => setSelectedSeries(null)} />;
-  }
 
   return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '32px' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+      
+      {/* Cabeçalho */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px' }}>
         <div>
-          <h1 style={{ marginBottom: '8px' }}>Gerenciar Séries</h1>
-          <p style={{ color: 'var(--text-secondary)' }}>Adicione séries e gerencie os episódios.</p>
+          <h1 style={{ fontSize: '2rem', fontWeight: 800, margin: '0 0 6px 0', letterSpacing: '-0.03em' }}>
+            Gerenciar Séries
+          </h1>
+          <p style={{ color: 'var(--text-secondary)', margin: 0, fontSize: '0.95rem' }}>
+            Séries e episódios hospedados no banco PostgreSQL de alta performance.
+          </p>
         </div>
 
-        <div style={{ display: 'flex', gap: '16px' }}>
-          {/* Contador Total */}
-          <div className="glass-card" style={{ padding: '12px 24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <div style={{ background: 'rgba(123, 47, 247, 0.2)', padding: '10px', borderRadius: '12px' }}>
-              <Tv size={24} color="var(--primary-light)" />
-            </div>
-            <div>
-              <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Total de Séries</div>
-              <div style={{ fontSize: '24px', fontWeight: 'bold' }}>{totalSeries}</div>
-            </div>
-          </div>
-
-          <button className="btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '8px', height: 'fit-content' }} onClick={() => setIsAddModalOpen(true)}>
-            <Plus size={20} />
-            Nova Série
-          </button>
-          
+        <div style={{ display: 'flex', gap: '12px' }}>
           <button 
-            style={{ 
-              display: 'flex', alignItems: 'center', gap: '8px', height: 'fit-content',
-              backgroundColor: 'rgba(233, 69, 96, 0.1)', color: 'var(--accent-alt)',
-              padding: '12px 24px', borderRadius: '12px', fontWeight: '600', transition: 'all 0.3s ease',
-              border: '1px solid rgba(233, 69, 96, 0.2)'
-            }} 
-            onClick={handleWipeAllSeries}
+            className="btn-secondary" 
+            onClick={() => fetchSeries(currentPage, searchTerm)} 
+            disabled={loading}
+            style={{ borderRadius: '12px' }}
           >
-            <Trash2 size={20} />
-            Limpar Tudo
+            <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
+            Atualizar
+          </button>
+          <button 
+            className="btn-primary" 
+            onClick={() => setIsAddModalOpen(true)}
+            style={{ borderRadius: '12px' }}
+          >
+            <Plus size={18} />
+            Nova Série
           </button>
         </div>
       </div>
 
-      <div className="glass-card" style={{ padding: '0', overflow: 'hidden' }}>
-        {loading ? (
-          <div style={{ padding: '60px', textAlign: 'center', color: 'var(--text-muted)' }}>Carregando catálogo de séries...</div>
-        ) : (
-          <>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', textAlign: 'left', background: 'rgba(0,0,0,0.2)' }}>
-                  <th style={{ padding: '16px 24px', color: 'var(--text-secondary)', fontWeight: '600' }}>Série</th>
-                  <th style={{ padding: '16px 24px', color: 'var(--text-secondary)', fontWeight: '600' }}>Tags / Categorias</th>
-                  <th style={{ padding: '16px 24px', color: 'var(--text-secondary)', fontWeight: '600', width: '220px' }}>Ações</th>
+      {/* Barra de Filtro e Estatística */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px' }}>
+        <div className="stat-card">
+          <div className="stat-icon-wrapper" style={{ background: 'rgba(123, 47, 247, 0.15)', color: 'var(--primary-light)' }}>
+            <Tv size={24} />
+          </div>
+          <div className="stat-info">
+            <div className="stat-value">{totalSeries}</div>
+            <div className="stat-label">Total no PostgreSQL</div>
+          </div>
+        </div>
+
+        <div className="glass-card" style={{ padding: '16px 20px', display: 'flex', alignItems: 'center' }}>
+          <form onSubmit={handleSearchSubmit} style={{ display: 'flex', width: '100%', gap: '10px' }}>
+            <div style={{ position: 'relative', flex: 1 }}>
+              <Search size={18} style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+              <input
+                type="text"
+                placeholder="Buscar série por título..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                style={{ paddingLeft: '44px', borderRadius: '10px' }}
+              />
+            </div>
+            <button type="submit" className="btn-secondary" style={{ padding: '10px 18px', borderRadius: '10px' }}>
+              Buscar
+            </button>
+          </form>
+        </div>
+      </div>
+
+      {/* Tabela de Séries com Bordas Suaves */}
+      {loading ? (
+        <div className="glass-card" style={{ textAlign: 'center', padding: '48px', color: 'var(--text-secondary)' }}>
+          <div className="status-dot-online" style={{ margin: '0 auto 16px' }}></div>
+          Carregando séries do PostgreSQL...
+        </div>
+      ) : (
+        <div className="data-table-container">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Poster & Título</th>
+                <th>Tags / Gêneros</th>
+                <th>Nota TMDB</th>
+                <th>Lançamento</th>
+                <th style={{ textAlign: 'right' }}>Ações</th>
+              </tr>
+            </thead>
+            <tbody>
+              {series.length === 0 ? (
+                <tr>
+                  <td colSpan="5" style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
+                    Nenhuma série encontrada.
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {series.length === 0 ? (
-                  <tr>
-                    <td colSpan="3" style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>
-                      Nenhuma série nesta página.
-                    </td>
-                  </tr>
-                ) : (
-                  series.map(item => (
-                    <tr key={item.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', transition: 'background 0.2s' }} className="hover-row">
-                      <td style={{ padding: '16px 24px', display: 'flex', alignItems: 'center', gap: '16px' }}>
-                        <img 
-                          src={`https://image.tmdb.org/t/p/w92${item.posterPath}`} 
-                          alt={item.title} 
-                          style={{ width: '48px', height: '72px', objectFit: 'cover', borderRadius: '6px', boxShadow: '0 4px 8px rgba(0,0,0,0.3)' }}
-                        />
-                        <div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                            <span style={{ fontWeight: '500', fontSize: '15px' }}>{item.title}</span>
-                            {item.isHighlight && <Star size={14} color="#FFD700" fill="#FFD700" title="Destaque" />}
+              ) : (
+                series.map(s => {
+                  const posterUrl = s.poster_path 
+                    ? (s.poster_path.startsWith('http') ? s.poster_path : `https://image.tmdb.org/t/p/w200${s.poster_path}`)
+                    : null;
+
+                  return (
+                    <tr key={s.id}>
+                      <td>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                          {posterUrl ? (
+                            <img 
+                              src={posterUrl} 
+                              alt={s.title} 
+                              style={{ width: '42px', height: '62px', borderRadius: '8px', objectFit: 'cover', border: '1px solid var(--surface-border)' }}
+                            />
+                          ) : (
+                            <div style={{ width: '42px', height: '62px', borderRadius: '8px', background: 'var(--surface-light)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>
+                              <Tv size={20} />
+                            </div>
+                          )}
+                          <div>
+                            <div style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '0.95rem' }}>
+                              {s.title}
+                            </div>
+                            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                              ID: {s.id} | TMDB: {s.tmdb_id || 'N/A'}
+                            </div>
                           </div>
-                          <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>ID TMDB: {item.tmdbId}</div>
                         </div>
                       </td>
-                      <td style={{ padding: '16px 24px' }}>
-                        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                          {item.tags?.map(tag => (
-                            <span key={tag} style={{ background: 'rgba(123, 47, 247, 0.15)', color: 'var(--primary-light)', padding: '4px 10px', borderRadius: '6px', fontSize: '12px', border: '1px solid rgba(123, 47, 247, 0.3)' }}>
+
+                      <td>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', maxWidth: '240px' }}>
+                          {(s.tags || []).slice(0, 3).map((tag, tIdx) => (
+                            <span key={tIdx} className="badge badge-muted" style={{ fontSize: '0.7rem' }}>
                               {tag}
                             </span>
                           ))}
                         </div>
                       </td>
-                      <td style={{ padding: '16px 24px' }}>
-                        <div style={{ display: 'flex', gap: '8px' }}>
-                          <button 
-                            onClick={() => setSelectedSeries(item)}
+
+                      <td>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#FBBF24', fontWeight: 600 }}>
+                          <Star size={14} fill="#FBBF24" />
+                          <span>{s.vote_average ? Number(s.vote_average).toFixed(1) : '0.0'}</span>
+                        </div>
+                      </td>
+
+                      <td>
+                        <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                          {s.release_date || 'N/A'}
+                        </span>
+                      </td>
+
+                      <td style={{ textAlign: 'right' }}>
+                        <div style={{ display: 'inline-flex', gap: '8px' }}>
+                          <button
                             className="btn-secondary"
-                            style={{ padding: '6px 12px', display: 'flex', gap: '6px', alignItems: 'center', fontSize: '12px', height: 'fit-content' }} 
-                            title="Gerenciar Episódios"
+                            onClick={() => handleViewEpisodes(s)}
+                            style={{ padding: '6px 12px', fontSize: '0.8rem', borderRadius: '8px' }}
+                            title="Ver Episódios Cadastrados"
                           >
-                            <ListVideo size={16} /> Episódios
+                            <PlayCircle size={14} />
+                            Episódios
                           </button>
-                          <button onClick={() => openEdit(item)} className="action-btn edit-btn" title="Editar Série">
-                            <Edit2 size={16} />
-                          </button>
-                          <button onClick={() => handleDelete(item.id)} className="action-btn delete-btn" title="Excluir">
-                            <Trash2 size={16} />
+                          <button
+                            className="btn-danger"
+                            onClick={() => handleDelete(s.id, s.title)}
+                            style={{ padding: '6px 12px', fontSize: '0.8rem', borderRadius: '8px' }}
+                            title="Excluir Série"
+                          >
+                            <Trash2 size={14} />
                           </button>
                         </div>
                       </td>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-            
-            {/* Paginação */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 24px', background: 'rgba(0,0,0,0.2)', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
-              <div style={{ color: 'var(--text-muted)', fontSize: '14px' }}>
-                Mostrando página <b>{page}</b> {totalSeries > 0 && `de aproximadamente ${Math.ceil(totalSeries / PAGE_SIZE)}`}
-              </div>
-              <div style={{ display: 'flex', gap: '12px' }}>
-                <button 
-                  className="btn-secondary" 
-                  style={{ padding: '8px 16px', display: 'flex', alignItems: 'center', gap: '8px', opacity: page <= 1 ? 0.5 : 1 }} 
-                  onClick={goToPrevPage}
-                  disabled={page <= 1}
-                >
-                  <ChevronLeft size={18} /> Anterior
-                </button>
-                <button 
-                  className="btn-secondary" 
-                  style={{ padding: '8px 16px', display: 'flex', alignItems: 'center', gap: '8px', opacity: !hasMore ? 0.5 : 1 }} 
-                  onClick={goToNextPage}
-                  disabled={!hasMore}
-                >
-                  Próxima <ChevronRight size={18} />
-                </button>
-              </div>
-            </div>
-          </>
-        )}
-      </div>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
 
-      {/* MODAL: ADICIONAR SÉRIE */}
-      {isAddModalOpen && (
-        <div className="modal-overlay">
-          <div className="glass-card modal-content" style={{ width: '100%', maxWidth: '600px', maxHeight: '90vh', overflowY: 'auto' }}>
-            <h2 style={{ marginBottom: '24px' }}>Importar Nova Série</h2>
-            
-            <div style={{ display: 'flex', gap: '12px', marginBottom: '24px' }}>
-              <input 
-                type="text" placeholder="ID do TMDB..." value={tmdbId}
-                onChange={(e) => setTmdbId(e.target.value)}
-              />
-              <button className="btn-secondary" onClick={searchTmdb} disabled={isSearching} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Search size={18} /> {isSearching ? 'Buscando...' : 'Buscar'}
+          {/* Paginação */}
+          <div className="pagination-container" style={{ borderRadius: '0 0 var(--radius-xl) var(--radius-xl)' }}>
+            <div className="pagination-info">
+              Página <strong style={{ color: 'var(--text-primary)' }}>{currentPage}</strong> de <strong style={{ color: 'var(--text-primary)' }}>{totalPages}</strong> ({totalSeries} séries no total)
+            </div>
+
+            <div className="pagination-controls">
+              <button
+                className="pagination-btn"
+                onClick={() => fetchSeries(currentPage - 1, searchTerm)}
+                disabled={currentPage <= 1 || loading}
+              >
+                <ChevronLeft size={16} />
+              </button>
+              <button
+                className="pagination-btn"
+                onClick={() => fetchSeries(currentPage + 1, searchTerm)}
+                disabled={currentPage >= totalPages || loading}
+              >
+                <ChevronRight size={16} />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Episódios */}
+      {selectedSeries && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(0, 0, 0, 0.85)', backdropFilter: 'blur(10px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          padding: '24px', zIndex: 999
+        }}>
+          <div style={{
+            background: 'var(--surface)', border: '1px solid var(--surface-border-bright)',
+            borderRadius: '20px', maxWidth: '720px', width: '100%', maxHeight: '85vh',
+            display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: 'var(--shadow-lg)'
+          }}>
+            <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--surface-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 700 }}>{selectedSeries.title}</h3>
+                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Episódios cadastrados no PostgreSQL</span>
+              </div>
+              <button onClick={() => setSelectedSeries(null)} style={{ color: 'var(--text-muted)', padding: '4px' }}>
+                <X size={20} />
               </button>
             </div>
 
-            {preview && (
-              <div style={{ display: 'flex', gap: '24px', marginBottom: '24px', backgroundColor: 'rgba(0,0,0,0.2)', padding: '16px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.05)' }}>
-                <img 
-                  src={`https://image.tmdb.org/t/p/w185${preview.poster_path}`} 
-                  alt={preview.name}
-                  style={{ width: '100px', borderRadius: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.5)' }}
-                />
-                <div>
-                  <h3 style={{ fontSize: '18px', marginBottom: '8px' }}>{preview.name}</h3>
-                  <p style={{ fontSize: '13px', color: 'var(--text-secondary)', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden', lineHeight: '1.5' }}>
-                    {preview.overview}
-                  </p>
+            <div style={{ padding: '24px', overflowY: 'auto', flex: 1 }}>
+              {loadingEpisodes ? (
+                <div style={{ textAlign: 'center', padding: '32px', color: 'var(--text-muted)' }}>
+                  Carregando lista de episódios...
+                </div>
+              ) : episodes.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '32px', color: 'var(--text-muted)' }}>
+                  Nenhum episódio cadastrado para esta série ainda.
+                </div>
+              ) : (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '10px' }}>
+                  {episodes.map(ep => (
+                    <div key={ep.id} style={{
+                      background: 'rgba(255, 255, 255, 0.03)',
+                      border: '1px solid var(--surface-border)',
+                      borderRadius: '10px',
+                      padding: '12px 14px'
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                        <strong style={{ color: 'var(--accent)', fontSize: '0.88rem' }}>
+                          Temporada {ep.season_number} - Episódio {ep.episode_number}
+                        </strong>
+                      </div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {ep.title || 'Sem título'}
+                      </div>
+                      <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: '4px' }}>
+                        {ep.video_url}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div style={{ padding: '16px 24px', borderTop: '1px solid var(--surface-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(0,0,0,0.2)' }}>
+              <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                Total: <strong style={{ color: 'white' }}>{episodes.length}</strong> episódios
+              </span>
+              <button className="btn-secondary" onClick={() => setSelectedSeries(null)} style={{ padding: '8px 20px', borderRadius: '10px' }}>
+                Fechar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Nova Série via TMDB */}
+      {isAddModalOpen && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(0, 0, 0, 0.85)', backdropFilter: 'blur(10px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          padding: '24px', zIndex: 999
+        }}>
+          <div style={{
+            background: 'var(--surface)', border: '1px solid var(--surface-border-bright)',
+            borderRadius: '20px', maxWidth: '520px', width: '100%',
+            overflow: 'hidden', boxShadow: 'var(--shadow-lg)'
+          }}>
+            <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--surface-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 700 }}>Adicionar Série Manual</h3>
+              <button onClick={() => setIsAddModalOpen(false)} style={{ color: 'var(--text-muted)', padding: '4px' }}>
+                <X size={20} />
+              </button>
+            </div>
+
+            <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '8px' }}>
+                  ID da Série no TMDB (TheMovieDB):
+                </label>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <input
+                    type="number"
+                    placeholder="Ex: 82951"
+                    value={tmdbIdInput}
+                    onChange={(e) => setTmdbIdInput(e.target.value)}
+                    style={{ borderRadius: '10px' }}
+                  />
+                  <button 
+                    type="button" 
+                    className="btn-secondary" 
+                    onClick={searchTmdb}
+                    disabled={isSearchingTmdb}
+                    style={{ borderRadius: '10px' }}
+                  >
+                    {isSearchingTmdb ? 'Buscando...' : 'Buscar'}
+                  </button>
                 </div>
               </div>
-            )}
 
-            <div style={{ marginBottom: '24px' }}>
-              <label style={{ display: 'block', marginBottom: '8px', color: 'var(--text-secondary)', fontSize: '14px', fontWeight: '500' }}>Categorias / Tags</label>
-              {renderTagsSelector(tags, false)}
+              {tmdbPreview && (
+                <div style={{
+                  background: 'rgba(255, 255, 255, 0.03)',
+                  border: '1px solid var(--surface-border)',
+                  borderRadius: '14px',
+                  padding: '16px',
+                  display: 'flex',
+                  gap: '14px'
+                }}>
+                  {tmdbPreview.poster_path && (
+                    <img 
+                      src={`https://image.tmdb.org/t/p/w200${tmdbPreview.poster_path}`} 
+                      alt="Capa" 
+                      style={{ width: '60px', height: '90px', borderRadius: '8px', objectFit: 'cover' }}
+                    />
+                  )}
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: '1rem', color: 'white' }}>{tmdbPreview.name}</div>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '4px' }}>
+                      Estreia: {tmdbPreview.first_air_date} • Nota: {tmdbPreview.vote_average}
+                    </div>
+                    <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '6px', maxHeight: '50px', overflow: 'hidden' }}>
+                      {tmdbPreview.overview || 'Sem sinopse disponível.'}
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
 
-            <div style={{ marginBottom: '32px', background: 'rgba(0,0,0,0.2)', padding: '16px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.05)' }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', marginBottom: '16px' }}>
-                  <input type="checkbox" checked={isHighlightAdd} onChange={(e) => setIsHighlightAdd(e.target.checked)} style={{ width: '20px', height: '20px', accentColor: 'var(--primary)' }} />
-                  <span style={{ fontSize: '14px', color: 'var(--text-primary)' }}>⭐ Marcar como Destaque (Banner Principal)</span>
-                </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer' }}>
-                  <input type="checkbox" checked={isNewRelease} onChange={(e) => setIsNewRelease(e.target.checked)} style={{ width: '20px', height: '20px', accentColor: 'var(--primary)' }} />
-                  <span style={{ fontSize: '14px', color: 'var(--text-primary)' }}>🔔 É Lançamento? (Enviar Notificação Push)</span>
-                </label>
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '16px' }}>
-              <button className="btn-secondary" onClick={() => { setIsAddModalOpen(false); resetAddForm(); }}>Cancelar</button>
-              <button className="btn-primary" onClick={handleSaveSeries} disabled={isSaving || !preview}>
-                {isSaving ? 'Salvando...' : 'Importar Série'}
+            <div style={{ padding: '16px 24px', borderTop: '1px solid var(--surface-border)', display: 'flex', justifyContent: 'flex-end', gap: '10px', background: 'rgba(0,0,0,0.2)' }}>
+              <button className="btn-secondary" onClick={() => setIsAddModalOpen(false)} style={{ borderRadius: '10px' }}>
+                Cancelar
+              </button>
+              <button 
+                className="btn-primary" 
+                onClick={handleSaveNewSeries} 
+                disabled={!tmdbPreview || isSaving}
+                style={{ borderRadius: '10px' }}
+              >
+                {isSaving ? 'Salvando...' : 'Salvar no PostgreSQL'}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* MODAL: EDITAR SÉRIE */}
-      {isEditModalOpen && (
-        <div className="modal-overlay">
-          <div className="glass-card modal-content" style={{ width: '100%', maxWidth: '600px', maxHeight: '90vh', overflowY: 'auto' }}>
-            <h2 style={{ marginBottom: '24px' }}>Editar Série</h2>
-            
-            <div style={{ display: 'flex', gap: '20px', marginBottom: '24px', background: 'rgba(0,0,0,0.2)', padding: '16px', borderRadius: '12px' }}>
-              <img 
-                  src={`https://image.tmdb.org/t/p/w185${editForm.posterPath}`} 
-                  alt={editForm.title}
-                  style={{ width: '100px', borderRadius: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.5)' }}
-              />
-              <div style={{ flex: 1 }}>
-                <label style={{ display: 'block', marginBottom: '8px', color: 'var(--text-secondary)', fontSize: '14px', fontWeight: '500' }}>Título</label>
-                <input 
-                  type="text" value={editForm.title} onChange={(e) => setEditForm({...editForm, title: e.target.value})}
-                  style={{ width: '100%', marginBottom: '16px' }}
-                />
-                <label style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', cursor: 'pointer', background: 'rgba(255,215,0,0.1)', padding: '8px 12px', borderRadius: '8px', border: '1px solid rgba(255,215,0,0.2)' }}>
-                  <input type="checkbox" checked={editForm.isHighlight} onChange={(e) => setEditForm({...editForm, isHighlight: e.target.checked})} style={{ width: '16px', height: '16px', accentColor: '#FFD700' }} />
-                  <span style={{ fontSize: '14px', color: '#FFD700', fontWeight: '600' }}>⭐ Destaque Principal</span>
-                </label>
-              </div>
-            </div>
-
-            <div style={{ marginBottom: '16px' }}>
-              <label style={{ display: 'block', marginBottom: '8px', color: 'var(--text-secondary)', fontSize: '14px', fontWeight: '500' }}>Sinopse</label>
-              <textarea 
-                value={editForm.overview} onChange={(e) => setEditForm({...editForm, overview: e.target.value})}
-                style={{ width: '100%', minHeight: '100px', background: 'rgba(0,0,0,0.2)', border: '1px solid var(--surface-light)', borderRadius: '8px', padding: '12px', color: 'white', lineHeight: '1.5' }}
-              />
-            </div>
-
-            <div style={{ marginBottom: '32px' }}>
-              <label style={{ display: 'block', marginBottom: '8px', color: 'var(--text-secondary)', fontSize: '14px', fontWeight: '500' }}>Categorias / Tags</label>
-              {renderTagsSelector(editForm.tags, true)}
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '16px' }}>
-              <button className="btn-secondary" onClick={() => setIsEditModalOpen(false)}>Cancelar</button>
-              <button className="btn-primary" onClick={handleUpdateSeries} disabled={isSaving}>
-                {isSaving ? 'Salvando...' : 'Salvar Alterações'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

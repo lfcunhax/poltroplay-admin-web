@@ -1,7 +1,10 @@
 import React, { useState } from 'react';
-import { collection, addDoc, serverTimestamp, query, where, getDocs, limit } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, getDocs } from 'firebase/firestore';
 import { db } from '../firebase';
-import { Search } from 'lucide-react';
+import axios from 'axios';
+import { Bell, Search, Send, Film, Tv, CheckCircle, Image, Sparkles, Smartphone } from 'lucide-react';
+
+const SERIES_API_URL = 'https://series.leflow.com.br';
 
 function NotificationsAdmin() {
   const [title, setTitle] = useState('');
@@ -11,234 +14,338 @@ function NotificationsAdmin() {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
-  const [selectedContent, setSelectedContent] = useState(null);
+  const [successModal, setSuccessModal] = useState(false);
 
   const handleSearch = async (e) => {
     e.preventDefault();
-    if (!searchQuery) return;
+    if (!searchQuery.trim()) return;
 
     setIsSearching(true);
     setSearchResults([]);
     try {
-      // Basic text search simulation in Firestore (Firestore doesn't support full-text natively without extensions)
-      // So we will just fetch recent items and filter locally for simplicity in this admin panel
+      const q = searchQuery.toLowerCase().trim();
       
+      // 1. Busca em Filmes (Firestore)
       const moviesSnap = await getDocs(collection(db, 'movies'));
-      const seriesSnap = await getDocs(collection(db, 'series'));
-      
-      const allContent = [];
-      moviesSnap.forEach(doc => allContent.push({ id: doc.id, ...doc.data(), type: 'Filme' }));
-      seriesSnap.forEach(doc => allContent.push({ id: doc.id, ...doc.data(), type: 'Série' }));
-      
-      const q = searchQuery.toLowerCase();
-      const results = allContent.filter(item => 
-        (item.title && item.title.toLowerCase().includes(q)) || 
-        (item.name && item.name.toLowerCase().includes(q))
-      ).slice(0, 5); // top 5 results
+      const matchedMovies = [];
+      moviesSnap.forEach(docSnap => {
+        const d = docSnap.data();
+        if ((d.title || '').toLowerCase().includes(q)) {
+          matchedMovies.push({
+            id: docSnap.id,
+            title: d.title,
+            overview: d.overview || '',
+            posterPath: d.posterPath,
+            backdropPath: d.backdropPath,
+            type: 'Filme'
+          });
+        }
+      });
 
-      setSearchResults(results);
-    } catch (error) {
-      console.error("Error searching:", error);
+      // 2. Busca em Séries (PostgreSQL API)
+      let matchedSeries = [];
+      try {
+        const sRes = await axios.get(`${SERIES_API_URL}/series?search=${encodeURIComponent(q)}&limit=10`);
+        const sList = sRes.data?.series || [];
+        matchedSeries = sList.map(s => ({
+          id: s.id,
+          title: s.title,
+          overview: s.overview || '',
+          posterPath: s.poster_path,
+          backdropPath: s.backdrop_path,
+          type: 'Série'
+        }));
+      } catch (sErr) {
+        console.warn("Erro ao buscar séries na API:", sErr.message);
+      }
+
+      const combined = [...matchedMovies.slice(0, 8), ...matchedSeries.slice(0, 8)];
+      setSearchResults(combined);
+    } catch (err) {
+      console.error("Erro na busca de conteúdo:", err);
     } finally {
       setIsSearching(false);
     }
   };
 
   const handleSelectContent = (item) => {
-    const itemTitle = item.title || item.name;
-    setTitle(`Novo Lançamento: ${itemTitle}`);
-    setBody(`${itemTitle} já está disponível no PoltroPlay. Venha assistir agora mesmo!`);
-    if (item.backdropPath) {
-      setImageUrl(`https://image.tmdb.org/t/p/w780${item.backdropPath}`);
-    } else if (item.posterPath) {
-      setImageUrl(`https://image.tmdb.org/t/p/w500${item.posterPath}`);
+    setTitle(`Novo Lançamento: ${item.title}`);
+    setBody(item.overview ? (item.overview.substring(0, 140) + '...') : `Assista agora a ${item.title} no PoltroPlay!`);
+    
+    let img = item.backdropPath || item.posterPath;
+    if (img) {
+      if (!img.startsWith('http')) {
+        img = `https://image.tmdb.org/t/p/w780${img}`;
+      }
+      setImageUrl(img);
     }
-    setSelectedContent({
-      id: item.id,
-      type: item.type === 'Filme' ? 'movie' : 'tv'
-    });
-    setSearchQuery('');
     setSearchResults([]);
+    setSearchQuery('');
   };
 
   const handleSendNotification = async (e) => {
     e.preventDefault();
-    if (!title || !body) {
-      alert('Título e Mensagem são obrigatórios!');
+    if (!title.trim() || !body.trim()) {
+      alert("Preencha o título e a mensagem da notificação.");
       return;
     }
 
     setSending(true);
     try {
-      // Em uma aplicação real de produção, isso acionaria uma Cloud Function
-      // que envia a notificação via Firebase Cloud Messaging (FCM).
-      // Aqui vamos salvar em uma coleção 'notifications' que pode ser
-      // monitorada pela Cloud Function, ou lida diretamente pelo app para um "in-app inbox".
-      // Salva no banco de dados para histórico
       await addDoc(collection(db, 'notifications'), {
-        title,
-        body,
-        imageUrl,
-        contentId: selectedContent?.id || null,
-        contentType: selectedContent?.type || null,
-        createdAt: serverTimestamp(),
-        status: 'sent' 
+        title: title.trim(),
+        body: body.trim(),
+        imageUrl: imageUrl.trim() || null,
+        status: 'pending',
+        createdAt: serverTimestamp()
       });
 
-      // Dispara a notificação real usando o nosso backend local
-      const backendUrl = import.meta.env.VITE_API_URL || 'https://api.leflow.com.br';
-      const backendResponse = await fetch(`${backendUrl}/api/notifications/send`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          title, 
-          body, 
-          imageUrl,
-          contentId: selectedContent?.id,
-          contentType: selectedContent?.type
-        })
-      });
-
-      const result = await backendResponse.json();
-
-      if (result.success) {
-        alert('Notificação Push disparada com sucesso!');
-        setTitle('');
-        setBody('');
-        setImageUrl('');
-        setSelectedContent(null);
-      } else {
-        alert('Erro do Backend: ' + (result.error || 'Falha ao enviar'));
-      }
-      setSending(false);
-
-    } catch (error) {
-      console.error('Erro ao enviar notificação:', error);
-      alert('Erro ao enviar notificação.');
+      setSuccessModal(true);
+      setTitle('');
+      setBody('');
+      setImageUrl('');
+    } catch (err) {
+      console.error("Erro ao enviar notificação:", err);
+      alert("Erro ao disparar notificação: " + err.message);
+    } finally {
       setSending(false);
     }
   };
 
   return (
-    <div className="admin-content">
-      <div className="admin-header">
-        <h1>Enviar Notificação Push</h1>
-        <p>Envie alertas diretamente para o celular de todos os usuários do app.</p>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+      
+      {/* Cabeçalho */}
+      <div>
+        <h1 style={{ fontSize: '2rem', fontWeight: 800, margin: '0 0 6px 0', letterSpacing: '-0.03em' }}>
+          Enviar Notificação Push
+        </h1>
+        <p style={{ color: 'var(--text-secondary)', margin: 0, fontSize: '0.95rem' }}>
+          Envie alertas diretamente para o celular de todos os usuários do app PoltroPlay.
+        </p>
       </div>
 
-      <div className="form-card">
-        {/* Smart Search Box */}
-        <div style={{ marginBottom: '32px', paddingBottom: '24px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-          <h3 style={{ marginBottom: '16px', fontSize: '16px' }}>Busca Inteligente (Auto-preenchimento)</h3>
-          <p style={{ color: 'var(--text-secondary)', fontSize: '14px', marginBottom: '16px' }}>
-            Pesquise por um filme ou série salvo para preencher a notificação automaticamente com a capa.
-          </p>
-          <form onSubmit={handleSearch} style={{ display: 'flex', gap: '12px' }}>
-            <input 
-              type="text" 
-              placeholder="Ex: Homem-Aranha" 
+      {/* Busca Rápida com Auto-preenchimento */}
+      <div className="glass-card" style={{ padding: '20px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px', fontSize: '0.9rem', fontWeight: 600, color: 'var(--accent)' }}>
+          <Sparkles size={18} />
+          <span>Busca Inteligente (Auto-preenchimento com Capa)</span>
+        </div>
+        <form onSubmit={handleSearch} style={{ display: 'flex', gap: '10px' }}>
+          <div style={{ position: 'relative', flex: 1 }}>
+            <Search size={18} style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+            <input
+              type="text"
+              placeholder="Pesquise por filme ou série para preencher capa e título automaticamente..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              style={{ flex: 1 }}
-            />
-            <button type="submit" className="btn-secondary" disabled={isSearching}>
-              {isSearching ? 'Buscando...' : <Search size={20} />}
-            </button>
-          </form>
-
-          {searchResults.length > 0 && (
-            <div style={{ marginTop: '16px', background: 'var(--surface)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.1)', overflow: 'hidden' }}>
-              {searchResults.map(item => (
-                <div 
-                  key={item.id} 
-                  onClick={() => handleSelectContent(item)}
-                  style={{ 
-                    padding: '12px 16px', 
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    gap: '16px',
-                    borderBottom: '1px solid rgba(255,255,255,0.05)',
-                    cursor: 'pointer',
-                    transition: 'background 0.2s'
-                  }}
-                  onMouseOver={(e) => e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.05)'}
-                  onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-                >
-                  {item.posterPath ? (
-                    <img src={`https://image.tmdb.org/t/p/w92${item.posterPath}`} style={{ width: '40px', height: '60px', objectFit: 'cover', borderRadius: '4px' }} alt="poster" />
-                  ) : (
-                    <div style={{ width: '40px', height: '60px', background: 'var(--surface-light)', borderRadius: '4px' }} />
-                  )}
-                  <div>
-                    <div style={{ fontWeight: 'bold' }}>{item.title || item.name}</div>
-                    <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{item.type}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <form onSubmit={handleSendNotification} className="notification-form">
-          
-          <div className="form-group">
-            <label>Título da Notificação</label>
-            <input 
-              type="text" 
-              placeholder="Ex: Novo Lançamento: Vingadores!" 
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              required
+              style={{ paddingLeft: '44px', borderRadius: '12px' }}
             />
           </div>
-
-          <div className="form-group">
-            <label>Mensagem</label>
-            <textarea 
-              placeholder="Descreva a novidade para seus usuários..." 
-              value={body}
-              onChange={(e) => setBody(e.target.value)}
-              rows="4"
-              required
-            ></textarea>
-          </div>
-
-          <div className="form-group">
-            <label>URL da Imagem (Opcional)</label>
-            <input 
-              type="text" 
-              placeholder="https://exemplo.com/imagem.jpg" 
-              value={imageUrl}
-              onChange={(e) => setImageUrl(e.target.value)}
-            />
-          </div>
-
-          <button type="submit" className="btn-primary btn-large" disabled={sending}>
-            {sending ? (
-              <><i className="fas fa-spinner fa-spin"></i> Enviando...</>
-            ) : (
-              <><i className="fas fa-paper-plane"></i> Disparar Notificação</>
-            )}
+          <button 
+            type="submit" 
+            className="btn-secondary" 
+            disabled={isSearching}
+            style={{ borderRadius: '12px', padding: '10px 20px' }}
+          >
+            {isSearching ? 'Buscando...' : 'Buscar'}
           </button>
         </form>
+
+        {searchResults.length > 0 && (
+          <div style={{
+            marginTop: '16px',
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
+            gap: '10px',
+            maxHeight: '260px',
+            overflowY: 'auto',
+            padding: '4px'
+          }}>
+            {searchResults.map(item => (
+              <div 
+                key={`${item.type}-${item.id}`}
+                onClick={() => handleSelectContent(item)}
+                style={{
+                  background: 'rgba(255, 255, 255, 0.04)',
+                  border: '1px solid var(--surface-border)',
+                  borderRadius: '12px',
+                  padding: '10px 14px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '12px',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s'
+                }}
+                onMouseOver={(e) => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.backgroundColor = 'rgba(0, 212, 255, 0.08)'; }}
+                onMouseOut={(e) => { e.currentTarget.style.borderColor = 'var(--surface-border)'; e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.04)'; }}
+              >
+                {item.type === 'Filme' ? <Film size={18} style={{ color: 'var(--accent)' }} /> : <Tv size={18} style={{ color: '#FBBF24' }} />}
+                <div style={{ overflow: 'hidden' }}>
+                  <div style={{ fontWeight: 600, fontSize: '0.9rem', color: 'white', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {item.title}
+                  </div>
+                  <span className="badge badge-muted" style={{ fontSize: '0.7rem', marginTop: '4px' }}>
+                    {item.type}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
-      
-      <div className="notification-preview">
-        <h3>Pré-visualização (Android)</h3>
-        <div className="mock-phone">
-          <div className="mock-notification">
-            <div className="mock-notif-header">
-              <i className="fas fa-play-circle" style={{color: '#7B2FF7'}}></i>
-              <span>PoltroPlay • Agora</span>
+
+      {/* Grid: Formulário + Pré-visualização em Tempo Real */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '24px' }}>
+        
+        {/* Formulário de Envio */}
+        <div className="glass-card" style={{ padding: '24px' }}>
+          <form onSubmit={handleSendNotification} style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+            <div>
+              <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '8px' }}>
+                Título da Notificação:
+              </label>
+              <input
+                type="text"
+                placeholder="Ex: Novo Lançamento: Vingadores!"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                required
+                style={{ borderRadius: '12px' }}
+              />
             </div>
-            <div className="mock-notif-content">
-              <h4>{title || 'Título da Notificação'}</h4>
-              <p>{body || 'Mensagem da notificação aparecerá aqui...'}</p>
-              {imageUrl && <img src={imageUrl} alt="preview" className="mock-notif-image" />}
+
+            <div>
+              <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '8px' }}>
+                Mensagem:
+              </label>
+              <textarea
+                placeholder="Descreva a novidade para seus usuários..."
+                rows={4}
+                value={body}
+                onChange={(e) => setBody(e.target.value)}
+                required
+                style={{ borderRadius: '12px', resize: 'vertical' }}
+              />
+            </div>
+
+            <div>
+              <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '8px' }}>
+                URL da Imagem / Banner (Opcional):
+              </label>
+              <input
+                type="url"
+                placeholder="https://exemplo.com/imagem.jpg"
+                value={imageUrl}
+                onChange={(e) => setImageUrl(e.target.value)}
+                style={{ borderRadius: '12px' }}
+              />
+            </div>
+
+            <button 
+              type="submit" 
+              className="btn-primary" 
+              disabled={sending}
+              style={{ borderRadius: '12px', padding: '14px', marginTop: '6px' }}
+            >
+              <Send size={18} />
+              {sending ? 'Disparando Notificação...' : 'Disparar Notificação'}
+            </button>
+          </form>
+        </div>
+
+        {/* Pré-visualização com Bordas Suaves (Estilo Smartphone Android) */}
+        <div className="glass-card" style={{ padding: '24px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '20px', color: 'var(--text-secondary)', fontWeight: 600, fontSize: '0.9rem', width: '100%' }}>
+            <Smartphone size={18} style={{ color: 'var(--accent)' }} />
+            <span>Pré-visualização no Smartphone (Android)</span>
+          </div>
+
+          <div className="push-preview-card" style={{ width: '100%' }}>
+            {/* Header da Notificação */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <div style={{
+                  width: '24px', height: '24px', borderRadius: '6px',
+                  background: 'linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  color: 'white', fontWeight: 700, fontSize: '0.75rem'
+                }}>
+                  P
+                </div>
+                <span style={{ fontSize: '0.82rem', fontWeight: 600, color: 'white' }}>PoltroPlay</span>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>• agora</span>
+              </div>
+              <Bell size={14} style={{ color: 'var(--text-muted)' }} />
+            </div>
+
+            {/* Conteúdo */}
+            <div style={{ display: 'flex', gap: '12px' }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 700, fontSize: '0.95rem', color: 'white', marginBottom: '4px' }}>
+                  {title || 'Título da Notificação'}
+                </div>
+                <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.4 }}>
+                  {body || 'Mensagem da notificação aparecerá aqui...'}
+                </div>
+              </div>
+
+              {imageUrl && (
+                <img 
+                  src={imageUrl} 
+                  alt="Prévia" 
+                  style={{ width: '56px', height: '56px', borderRadius: '10px', objectFit: 'cover', flexShrink: 0, border: '1px solid var(--surface-border)' }}
+                  onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                />
+              )}
             </div>
           </div>
         </div>
+
       </div>
+
+      {/* Modal de Sucesso */}
+      {successModal && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(0, 0, 0, 0.85)', backdropFilter: 'blur(10px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          padding: '24px', zIndex: 999
+        }}>
+          <div style={{
+            background: 'var(--surface)', border: '1px solid var(--surface-border-bright)',
+            borderRadius: '20px', maxWidth: '440px', width: '100%',
+            overflow: 'hidden', boxShadow: 'var(--shadow-lg)'
+          }}>
+            <div style={{ padding: '24px', textAlign: 'center' }}>
+              <div style={{
+                width: '60px', height: '60px', borderRadius: '50%',
+                background: 'rgba(16, 185, 129, 0.15)', color: '#34D399',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                margin: '0 auto 16px'
+              }}>
+                <CheckCircle size={32} />
+              </div>
+              <h3 style={{ fontSize: '1.25rem', fontWeight: 700, color: 'white', margin: '0 0 8px 0' }}>
+                Notificação Agendada!
+              </h3>
+              <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', lineHeight: 1.5, margin: 0 }}>
+                A notificação foi salva com sucesso e será disparada para todos os usuários cadastrados.
+              </p>
+            </div>
+            <div style={{ padding: '16px 24px', borderTop: '1px solid var(--surface-border)', display: 'flex', justifyContent: 'center', background: 'rgba(0,0,0,0.2)' }}>
+              <button 
+                className="btn-primary" 
+                onClick={() => setSuccessModal(false)}
+                style={{ padding: '8px 28px', borderRadius: '10px' }}
+              >
+                Concluir
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
