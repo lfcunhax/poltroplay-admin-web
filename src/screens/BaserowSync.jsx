@@ -268,21 +268,85 @@ function BaserowSync() {
 
   const fetchAllBaserowRows = async (tableId) => {
     const cleanToken = baserowConfig.token.replace(/^Token\s+/i, '').trim();
-    const baseUrl = baserowConfig.baseUrl.replace(/(\/api\/?|\/)$/i, '');
-    let nextPageUrl = `${baseUrl}/api/database/rows/table/${tableId}/?user_field_names=true&size=200`;
+    let baseUrl = baserowConfig.baseUrl.replace(/(\/api\/?|\/)$/i, '');
+    
+    // Força HTTPS se o painel estiver rodando em HTTPS para evitar Mixed Content
+    if (window.location.protocol === 'https:' && baseUrl.startsWith('http://')) {
+      baseUrl = baseUrl.replace(/^http:\/\//i, 'https://');
+    }
+
     const allRows = [];
+    let nextPageUrl = `${baseUrl}/api/database/rows/table/${tableId}/?user_field_names=true&size=200`;
     let pageCount = 0;
 
     while (nextPageUrl) {
       pageCount++;
       addLog(`Buscando lote ${pageCount} do Baserow...`, 'info');
-      const response = await axios.get(nextPageUrl, {
-        headers: { Authorization: `Token ${cleanToken}` }
-      });
 
-      if (response.data && response.data.results) {
+      // Sanitiza nextPageUrl para garantir HTTPS
+      let targetUrl = nextPageUrl;
+      if (window.location.protocol === 'https:' && targetUrl.startsWith('http://')) {
+        targetUrl = targetUrl.replace(/^http:\/\//i, 'https://');
+      }
+
+      // Se o Baserow retornou um host interno/incompatível em next, redireciona para o baseUrl correto
+      try {
+        const parsedBase = new URL(baseUrl);
+        const parsedNext = new URL(targetUrl);
+        if (parsedNext.host !== parsedBase.host) {
+          targetUrl = `${baseUrl}${parsedNext.pathname}${parsedNext.search}`;
+        }
+      } catch (_) {}
+
+      let response = null;
+      let lastErr = null;
+
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          response = await axios.get(targetUrl, {
+            headers: { Authorization: `Token ${cleanToken}` },
+            timeout: 20000
+          });
+          break;
+        } catch (err) {
+          lastErr = err;
+          // Se falhou por Mixed Content ou Network Error direto, tenta via proxy backend
+          if (attempt === 2 || err.message === 'Network Error') {
+            try {
+              const proxyUrl = `${SERIES_API_URL}/admin/baserow-proxy?url=${encodeURIComponent(targetUrl)}&token=${encodeURIComponent(cleanToken)}`;
+              response = await axios.get(proxyUrl, { timeout: 25000 });
+              break;
+            } catch (_) {}
+          }
+          if (attempt < 3) {
+            await new Promise(r => setTimeout(r, 1000));
+          }
+        }
+      }
+
+      if (!response || !response.data) {
+        throw new Error(lastErr?.response?.data?.detail || lastErr?.message || `Falha de rede ao buscar lote ${pageCount} do Baserow`);
+      }
+
+      if (response.data.results) {
         allRows.push(...response.data.results);
-        nextPageUrl = response.data.next;
+        
+        if (response.data.next) {
+          let next = response.data.next;
+          if (window.location.protocol === 'https:' && next.startsWith('http://')) {
+            next = next.replace(/^http:\/\//i, 'https://');
+          }
+          try {
+            const parsedBase = new URL(baseUrl);
+            const parsedNext = new URL(next);
+            if (parsedNext.host !== parsedBase.host) {
+              next = `${baseUrl}${parsedNext.pathname}${parsedNext.search}`;
+            }
+          } catch (_) {}
+          nextPageUrl = next;
+        } else {
+          break;
+        }
       } else {
         break;
       }
