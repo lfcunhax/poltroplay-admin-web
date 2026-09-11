@@ -5,7 +5,7 @@ import axios from 'axios';
 import { 
   Database, Search, CheckCircle, AlertTriangle, Zap, 
   Film, Tv, PlayCircle, ChevronDown, ChevronRight, Layers, Terminal,
-  Sparkles, Trash2, RefreshCw, ShieldCheck
+  Sparkles, Trash2, RefreshCw, ShieldCheck, ArrowRightLeft
 } from 'lucide-react';
 
 const DEFAULT_TMDB_KEY = '384caf4e90af984a7c5595ea5d9bb386';
@@ -32,9 +32,6 @@ const TV_KEYWORDS = [
   'campeonato', 'novela'
 ];
 
-/**
- * Normaliza strings para comparação robusta (sem acentos, pontuações, caracteres especiais)
- */
 function normalizeTitle(str) {
   if (!str) return '';
   return str
@@ -46,9 +43,6 @@ function normalizeTitle(str) {
     .trim();
 }
 
-/**
- * Extrai o nome de arquivo final de um link de streaming (ex: tt26469192.mp4)
- */
 function extractVideoFileName(url) {
   if (!url) return '';
   try {
@@ -61,9 +55,6 @@ function extractVideoFileName(url) {
   }
 }
 
-/**
- * Limpa o nome da série removendo menções de temporadas e episódios
- */
 function cleanSeriesTitle(name) {
   if (!name) return '';
   return name
@@ -74,14 +65,10 @@ function cleanSeriesTitle(name) {
     .trim();
 }
 
-/**
- * Parser Inteligente de Episódios Multi-Padrão
- */
 function parseEpisodeDetails(row, url, name) {
   let seasonNumber = null;
   let episodeNumber = null;
 
-  // 1. Tenta colunas explícitas no Baserow
   const colSeason = row.Temporada || row.temporada || row['# Temporada'] || row['Season'];
   const colEp = row['Episódio'] || row.episodio || row.Episodio || row['# Episódio'] || row['Episode'];
 
@@ -95,22 +82,20 @@ function parseEpisodeDetails(row, url, name) {
     if (!isNaN(eParsed) && eParsed > 0) episodeNumber = eParsed;
   }
 
-  // 2. Se já achou ambos pelas colunas, retorna com sucesso
   if (seasonNumber !== null && episodeNumber !== null) {
     return { seasonNumber, episodeNumber, videoUrl: url, sourceRowId: row.id };
   }
 
-  // 3. Fallback: Expressões Regulares no Nome e na URL
   const searchTargets = [name || '', url || ''];
 
   const regexPatterns = [
-    /(\d+)\s*x\s*(\d+)/i,                     // Ex: 1x4, 01x04, 1X04
-    /[sS](\d+)[\.\s_-]*[eE](\d+)/i,          // Ex: S01E04, S1E4, S01.E04
-    /[tT](\d+)[\.\s_-]*[eE](\d+)/i,          // Ex: T01E04, T1E4 (padrão Brasil)
-    /temporada\s*(\d+).*?epis[oó]dio\s*(\d+)/i, // Ex: Temporada 1 Episódio 4
-    /temp\s*(\d+).*?ep\s*(\d+)/i,             // Ex: Temp 1 Ep 4
-    /season\s*(\d+).*?episode\s*(\d+)/i,      // Ex: Season 1 Episode 4
-    /(\d{1,2})(\d{2})\.mp4/i,                 // Ex: 104.mp4 (Temp 1 Ep 04)
+    /(\d+)\s*x\s*(\d+)/i,
+    /[sS](\d+)[\.\s_-]*[eE](\d+)/i,
+    /[tT](\d+)[\.\s_-]*[eE](\d+)/i,
+    /temporada\s*(\d+).*?epis[oó]dio\s*(\d+)/i,
+    /temp\s*(\d+).*?ep\s*(\d+)/i,
+    /season\s*(\d+).*?episode\s*(\d+)/i,
+    /(\d{1,2})(\d{2})\.mp4/i,
   ];
 
   for (const target of searchTargets) {
@@ -131,7 +116,6 @@ function parseEpisodeDetails(row, url, name) {
     }
   }
 
-  // 4. Se encontrou apenas o episódio isolado
   const epOnlyMatch = (name || '').match(/epis[oó]dio\s*(\d+)|ep\s*(\d+)|#\s*(\d+)/i);
   if (epOnlyMatch) {
     const e = parseInt(epOnlyMatch[1] || epOnlyMatch[2] || epOnlyMatch[3], 10);
@@ -145,7 +129,6 @@ function parseEpisodeDetails(row, url, name) {
     }
   }
 
-  // Fallback padrão se não conseguir detectar números: Temporada 1 Episódio 1
   return {
     seasonNumber: seasonNumber !== null ? seasonNumber : 1,
     episodeNumber: episodeNumber !== null ? episodeNumber : 1,
@@ -158,9 +141,8 @@ function BaserowSync() {
   const [syncType, setSyncType] = useState('movie'); // 'movie' ou 'series'
   const [baserowConfig, setBaserowConfig] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [activeStep, setActiveStep] = useState('idle'); // 'idle', 'scanning', 'ready', 'syncing', 'done'
+  const [activeStep, setActiveStep] = useState('idle');
 
-  // Estatísticas do Diagnóstico
   const [stats, setStats] = useState({
     totalBaserow: 0,
     alreadySynced: 0,
@@ -169,22 +151,18 @@ function BaserowSync() {
     incompleteSeries: 0
   });
 
-  // Lista de Itens Inspecionados
   const [items, setItems] = useState([]);
-  const [filterMode, setFilterMode] = useState('all'); // 'all', 'new', 'new_episodes', 'incomplete', 'synced'
+  const [filterMode, setFilterMode] = useState('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [expandedSeries, setExpandedSeries] = useState({});
 
-  // Terminal de Logs ao Vivo (com scroll interno isolado)
   const [liveLogs, setLiveLogs] = useState([]);
   const terminalBoxRef = useRef(null);
   const [autoScrollTerminal, setAutoScrollTerminal] = useState(true);
 
-  // Paginação Inteligente para Grandes Listas
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(25);
 
-  // Modal de resultado
   const [syncModal, setSyncModal] = useState(null);
 
   useEffect(() => {
@@ -204,7 +182,6 @@ function BaserowSync() {
     }
   }, [liveLogs, autoScrollTerminal]);
 
-  // Reseta paginação ao alterar filtros ou busca
   useEffect(() => {
     setCurrentPage(1);
   }, [filterMode, searchTerm, syncType, items]);
@@ -215,9 +192,6 @@ function BaserowSync() {
     setLiveLogs(prev => [...prev.slice(-300), { time: timeStr, text: message, type }]);
   };
 
-  /**
-   * Baixa todas as linhas da tabela alvo no Baserow
-   */
   const fetchAllBaserowRows = async (tableId) => {
     const cleanToken = baserowConfig.token.replace(/^Token\s+/i, '').trim();
     const baseUrl = baserowConfig.baseUrl.replace(/(\/api\/?|\/)$/i, '');
@@ -249,7 +223,7 @@ function BaserowSync() {
   };
 
   /**
-   * 1. Diagnóstico e Verificação ao Vivo (Live Check) com Deduplicação Multi-Camadas
+   * 1. Diagnóstico ao Vivo com suporte a PostgreSQL (e fallback Firestore)
    */
   const handleLiveCheck = async () => {
     if (!baserowConfig || !baserowConfig.token || !baserowConfig.baseUrl) {
@@ -266,15 +240,13 @@ function BaserowSync() {
     setIsLoading(true);
     setActiveStep('scanning');
     setLiveLogs([]);
-    addLog(`Iniciando Verificação Inteligente ao Vivo para ${syncType === 'movie' ? 'FILMES' : 'SÉRIES'}...`, 'info');
+    addLog(`Iniciando Verificação Inteligente para ${syncType === 'movie' ? 'FILMES (PostgreSQL)' : 'SÉRIES (PostgreSQL)'}...`, 'info');
 
     try {
-      // 1. Baixar Baserow
       const rawRows = await fetchAllBaserowRows(tableId);
-      addLog(`Download do Baserow concluído com sucesso: ${rawRows.length} linhas brutas encontradas.`, 'success');
+      addLog(`Download do Baserow concluído: ${rawRows.length} linhas brutas encontradas.`, 'success');
 
-      // 2. Filtrar Canais de TV e Links Inválidos
-      addLog("Filtrando canais de TV ao vivo e streams inválidos...", 'info');
+      addLog("Filtrando canais de TV ao vivo e links inválidos...", 'info');
       const validRows = rawRows.filter(row => {
         const link = (row.Link || row.link || row.Url || row.url || '').trim().toLowerCase();
         const nome = (row.Nome || row.nome || row.Name || row.name || '').trim().toLowerCase();
@@ -286,14 +258,35 @@ function BaserowSync() {
         return !isTv;
       });
 
-      addLog(`${validRows.length} itens válidos após filtragem de canais ao vivo.`, 'info');
+      addLog(`${validRows.length} itens válidos após filtragem.`, 'info');
 
       if (syncType === 'movie') {
-        // --- DIAGNÓSTICO DE FILMES (Firestore com Deduplicação Rigorosa) ---
-        addLog("Consultando banco Firestore para mapear filmes já cadastrados...", 'info');
-        const moviesSnap = await getDocs(collection(db, 'movies'));
-        
-        // Multi-camadas de indexação
+        // --- DIAGNÓSTICO DE FILMES (Consulta PostgreSQL com fallback Firestore) ---
+        addLog("Consultando banco PostgreSQL para mapear filmes já cadastrados...", 'info');
+        let existingMoviesList = [];
+        try {
+          const res = await axios.get(`${SERIES_API_URL}/movies?limit=5000`);
+          existingMoviesList = res.data?.movies || [];
+          if (existingMoviesList.length > 0) {
+            addLog(`PostgreSQL possui ${existingMoviesList.length} filmes cadastrados.`, 'success');
+          }
+        } catch (apiErr) {
+          addLog(`Aviso da API PostgreSQL de filmes: ${apiErr.message}`, 'warn');
+        }
+
+        // Fallback: se o PostgreSQL ainda não foi migrado, busca do Firestore
+        let firestoreMoviesList = [];
+        if (existingMoviesList.length === 0) {
+          addLog("PostgreSQL ainda sem filmes. Consultando Firestore como base secundária...", 'info');
+          try {
+            const snap = await getDocs(collection(db, 'movies'));
+            snap.forEach(d => firestoreMoviesList.push(d.data()));
+            addLog(`Firestore possui ${firestoreMoviesList.length} filmes para referência.`, 'info');
+          } catch (_) {}
+        }
+
+        const combinedList = [...existingMoviesList, ...firestoreMoviesList];
+
         const existingByUrl = new Set();
         const existingByUrlFile = new Set();
         const existingByBaserowId = new Set();
@@ -301,25 +294,21 @@ function BaserowSync() {
         const existingByExactTitle = new Map();
         const existingByNormTitle = new Map();
 
-        moviesSnap.forEach(docSnap => {
-          const d = docSnap.data();
-          const rawUrl = (d.videoUrl || '').trim();
+        combinedList.forEach(d => {
+          const rawUrl = (d.video_url || d.videoUrl || '').trim();
           const lowerUrl = rawUrl.toLowerCase();
           const fileName = extractVideoFileName(rawUrl);
-          const tmdb = d.tmdbId ? String(d.tmdbId) : null;
+          const tmdb = (d.tmdb_id || d.tmdbId) ? String(d.tmdb_id || d.tmdbId) : null;
           const title = (d.title || '').trim();
           const normTitle = normalizeTitle(title);
 
           if (lowerUrl) existingByUrl.add(lowerUrl);
           if (fileName) existingByUrlFile.add(fileName);
-          if (d.baserowRowId) existingByBaserowId.add(String(d.baserowRowId));
+          if (d.baserow_row_id || d.baserowRowId) existingByBaserowId.add(String(d.baserow_row_id || d.baserowRowId));
           if (tmdb) existingByTmdb.set(tmdb, d);
           if (title) existingByExactTitle.set(title.toLowerCase(), d);
           if (normTitle) existingByNormTitle.set(normTitle, d);
         });
-
-        addLog(`Firestore possui ${moviesSnap.size} registros de filmes carregados.`, 'success');
-        addLog("Classificando novidades do Baserow com detecção anti-duplicação...", 'info');
 
         let alreadySyncedCount = 0;
         let newItemsCount = 0;
@@ -335,34 +324,21 @@ function BaserowSync() {
 
           let exists = null;
 
-          // 1. Checa por URL exata de vídeo
           if (lowerLink && existingByUrl.has(lowerLink)) {
             exists = true;
-          }
-          // 2. Checa por nome do arquivo de vídeo (ex: tt26469192.mp4)
-          else if (fileName && existingByUrlFile.has(fileName)) {
+          } else if (fileName && existingByUrlFile.has(fileName)) {
             exists = true;
-          }
-          // 3. Checa por Baserow Row ID
-          else if (existingByBaserowId.has(String(row.id))) {
+          } else if (existingByBaserowId.has(String(row.id))) {
             exists = true;
-          }
-          // 4. Checa por título exato
-          else if (existingByExactTitle.has(nome.toLowerCase())) {
+          } else if (existingByExactTitle.has(nome.toLowerCase())) {
             exists = existingByExactTitle.get(nome.toLowerCase());
-          }
-          else if (existingByExactTitle.has(cleanName.toLowerCase())) {
+          } else if (existingByExactTitle.has(cleanName.toLowerCase())) {
             exists = existingByExactTitle.get(cleanName.toLowerCase());
-          }
-          // 5. Checa por título normalizado (sem acentos e caracteres especiais)
-          else if (normNome && existingByNormTitle.has(normNome)) {
+          } else if (normNome && existingByNormTitle.has(normNome)) {
             exists = existingByNormTitle.get(normNome);
-          }
-          else if (normClean && existingByNormTitle.has(normClean)) {
+          } else if (normClean && existingByNormTitle.has(normClean)) {
             exists = existingByNormTitle.get(normClean);
-          }
-          // 6. Checa correspondência de prefixo no título
-          else if (normClean.length >= 6) {
+          } else if (normClean.length >= 6) {
             for (const [existingNorm, movieDoc] of existingByNormTitle.entries()) {
               if (existingNorm.startsWith(normClean) || normClean.startsWith(existingNorm)) {
                 exists = movieDoc;
@@ -404,23 +380,21 @@ function BaserowSync() {
         });
 
         setItems(analyzedMovies);
-        addLog(`Diagnóstico concluído: ${newItemsCount} filmes novos detectados | ${alreadySyncedCount} já sincronizados no Firestore.`, 'success');
+        addLog(`Diagnóstico concluído: ${newItemsCount} filmes novos detectados | ${alreadySyncedCount} já sincronizados.`, 'success');
         setActiveStep('ready');
       } else {
-        // --- DIAGNÓSTICO DE SÉRIES E EPISÓDIOS (PostgreSQL REST API) ---
+        // --- DIAGNÓSTICO DE SÉRIES (PostgreSQL) ---
         addLog(`Consultando API PostgreSQL (${SERIES_API_URL}/series) para mapear séries existentes...`, 'info');
         let existingSeriesList = [];
         try {
           const res = await axios.get(`${SERIES_API_URL}/series?limit=5000`);
           existingSeriesList = res.data?.series || [];
-          addLog(`PostgreSQL possui ${existingSeriesList.length} séries cadastradas no momento.`, 'success');
+          addLog(`PostgreSQL possui ${existingSeriesList.length} séries cadastradas.`, 'success');
         } catch (apiErr) {
           addLog(`Aviso ao conectar à API de séries: ${apiErr.message}`, 'warn');
         }
 
-        // Mapeia séries existentes no PostgreSQL com múltiplos identificadores
         const existingSeriesLookup = {};
-
         for (const s of existingSeriesList) {
           const normTitle = normalizeTitle(s.title);
           const cleanTitle = normalizeTitle(cleanSeriesTitle(s.title));
@@ -432,7 +406,6 @@ function BaserowSync() {
           if (cleanTitle) existingSeriesLookup[cleanTitle] = s;
         }
 
-        // Agrupa linhas do Baserow por Série
         const seriesMap = {};
         validRows.forEach(row => {
           const nome = row.Nome || row.nome || row.Name || row.name || '';
@@ -442,13 +415,8 @@ function BaserowSync() {
           if (!cleanName) return;
 
           if (!seriesMap[cleanName]) {
-            seriesMap[cleanName] = {
-              cleanName,
-              rawRows: [],
-              episodes: []
-            };
+            seriesMap[cleanName] = { cleanName, rawRows: [], episodes: [] };
           }
-
           seriesMap[cleanName].rawRows.push(row);
 
           const epDetail = parseEpisodeDetails(row, link, nome);
@@ -473,7 +441,6 @@ function BaserowSync() {
           const normSName = normalizeTitle(sName);
           const normClean = normalizeTitle(cleanTitle);
 
-          // Busca correspondência da série no PostgreSQL
           let existing = existingSeriesLookup[sName.toLowerCase()] 
             || existingSeriesLookup[cleanTitle.toLowerCase()]
             || existingSeriesLookup[normSName]
@@ -489,7 +456,6 @@ function BaserowSync() {
             }
           }
 
-          // Deduplica episódios do Baserow por TemporadaxEpisódio
           const uniqueEpisodesMap = new Map();
           sData.episodes.forEach(ep => {
             const key = `${ep.seasonNumber}x${ep.episodeNumber}`;
@@ -500,7 +466,6 @@ function BaserowSync() {
           const baserowEpisodes = Array.from(uniqueEpisodesMap.values());
 
           if (!existing) {
-            // Série Nova (ainda não existe no banco)
             newSeriesCount++;
             analyzedSeries.push({
               id: sName,
@@ -513,7 +478,6 @@ function BaserowSync() {
               existingInfo: null
             });
           } else {
-            // Série já existe no PostgreSQL! Checamos se tem episódios novos
             let existingEpSet = new Set();
             let existingUrlSet = new Set();
             try {
@@ -526,7 +490,6 @@ function BaserowSync() {
             } catch (_) {}
 
             if (existingEpSet.size === 0) {
-              // Série cadastrada no banco com 0 episódios
               incompleteCount++;
               analyzedSeries.push({
                 id: existing.id,
@@ -541,7 +504,6 @@ function BaserowSync() {
                 existingInfo: existing
               });
             } else {
-              // Checa se há episódios novos no Baserow
               const newEpisodes = baserowEpisodes.filter(ep => {
                 const epKey = `${ep.seasonNumber}x${ep.episodeNumber}`;
                 const epUrl = (ep.videoUrl || '').trim().toLowerCase();
@@ -564,7 +526,6 @@ function BaserowSync() {
                   existingInfo: existing
                 });
               } else {
-                // Série 100% atualizada
                 syncedCount++;
                 analyzedSeries.push({
                   id: existing.id,
@@ -605,7 +566,7 @@ function BaserowSync() {
   };
 
   /**
-   * 2. Sincronização Inteligente (Apenas Novos com Proteção Anti-Duplicata)
+   * 2. Sincronização Inteligente no PostgreSQL (Lote Transacional Rápido)
    */
   const handleSmartSync = async (syncAll = false) => {
     if (items.length === 0) {
@@ -622,52 +583,32 @@ function BaserowSync() {
       return;
     }
 
-    if (!window.confirm(`Iniciar Sincronização Inteligente para ${itemsToProcess.length} item(ns)?\nIsso NÃO duplicará nenhum item existente, apenas adicionará as novidades reais.`)) {
+    if (!window.confirm(`Iniciar Sincronização no PostgreSQL para ${itemsToProcess.length} item(ns)?\nIsso gravará os itens de forma ultrarrápida no banco unificado.`)) {
       return;
     }
 
     setIsLoading(true);
     setActiveStep('syncing');
-    addLog(`Iniciando Sincronização Inteligente para ${itemsToProcess.length} item(ns)...`, 'info');
+    addLog(`Iniciando Sincronização no PostgreSQL para ${itemsToProcess.length} item(ns)...`, 'info');
 
     try {
       if (syncType === 'movie') {
-        // --- SYNC DELTA DE FILMES (COM TRAVA ANTI-DUPLICAÇÃO) ---
-        let inserted = 0;
-        let skipped = 0;
-
-        // Memória em tempo real para impedir duplicatas no mesmo lote
-        const insertedUrls = new Set();
-        const insertedTmdb = new Set();
+        // --- SYNC EM LOTE DE FILMES (POSTGRESQL TRANSACTIONAL) ---
+        addLog(`Buscando dados no TMDB para ${itemsToProcess.length} filmes novos...`, 'info');
+        const moviesPayload = [];
 
         for (let i = 0; i < itemsToProcess.length; i++) {
           const item = itemsToProcess[i];
-          const itemUrl = (item.playbackUrl || '').trim().toLowerCase();
-
-          if (itemUrl && insertedUrls.has(itemUrl)) {
-            skipped++;
-            addLog(`[IGNORADO] URL duplicada no lote: "${item.cleanName}". Pulando...`, 'warn');
-            continue;
-          }
-
-          addLog(`[${i + 1}/${itemsToProcess.length}] Processando filme: "${item.cleanName}"...`, 'info');
+          addLog(`[${i + 1}/${itemsToProcess.length}] Consultando TMDB: "${item.cleanName}"...`, 'info');
 
           try {
-            // Busca dados e capa no TMDB
             const response = await axios.get(`https://api.themoviedb.org/3/search/movie?api_key=${baserowConfig?.tmdbKey || DEFAULT_TMDB_KEY}&language=pt-BR&query=${encodeURIComponent(item.cleanName)}`);
             
             if (response.data.results && response.data.results.length > 0) {
               const tmdbData = response.data.results[0];
               const genreNames = (tmdbData.genre_ids || []).map(id => GENRE_MAP[id]).filter(Boolean);
 
-              if (insertedTmdb.has(String(tmdbData.id))) {
-                skipped++;
-                addLog(`[IGNORADO] TMDB ID ${tmdbData.id} já inserido neste lote: "${tmdbData.title}".`, 'warn');
-                continue;
-              }
-
-              // Grava no Firestore com baserowRowId e segurança
-              await addDoc(collection(db, 'movies'), {
+              moviesPayload.push({
                 baserowRowId: item.id,
                 tmdbId: tmdbData.id,
                 title: tmdbData.title || item.cleanName,
@@ -676,43 +617,65 @@ function BaserowSync() {
                 backdropPath: tmdbData.backdrop_path || null,
                 voteAverage: tmdbData.vote_average || 0,
                 releaseDate: tmdbData.release_date || null,
-                videoUrl: item.playbackUrl || '',
+                videoUrl: item.playbackUrl,
                 tags: genreNames,
                 isHighlight: false,
-                source: 'baserow',
-                createdAt: serverTimestamp()
+                source: 'baserow'
               });
-
-              inserted++;
-              if (itemUrl) insertedUrls.add(itemUrl);
-              insertedTmdb.add(String(tmdbData.id));
-              addLog(`Sucesso: "${tmdbData.title}" salvo no Firestore.`, 'success');
             } else {
-              addLog(`Aviso: "${item.cleanName}" não encontrado no TMDB. Pulando...`, 'warn');
+              // Salva com dados do próprio Baserow caso não ache no TMDB
+              moviesPayload.push({
+                baserowRowId: item.id,
+                tmdbId: null,
+                title: item.cleanName,
+                overview: '',
+                posterPath: null,
+                backdropPath: null,
+                voteAverage: 0,
+                releaseDate: null,
+                videoUrl: item.playbackUrl,
+                tags: [],
+                isHighlight: false,
+                source: 'baserow'
+              });
             }
-          } catch (mErr) {
-            addLog(`Erro ao salvar filme "${item.cleanName}": ${mErr.message}`, 'error');
+          } catch (_) {
+            moviesPayload.push({
+              baserowRowId: item.id,
+              tmdbId: null,
+              title: item.cleanName,
+              videoUrl: item.playbackUrl,
+              tags: [],
+              source: 'baserow'
+            });
           }
 
-          await new Promise(r => setTimeout(r, 120));
+          await new Promise(r => setTimeout(r, 60));
         }
 
-        addLog(`Sincronização de filmes finalizada! ${inserted} adicionados | ${skipped} duplicatas evitadas.`, 'success');
+        addLog(`Enviando lote de ${moviesPayload.length} filmes para o PostgreSQL (${SERIES_API_URL}/movies/sync)...`, 'info');
+        const apiRes = await axios.post(
+          `${SERIES_API_URL}/movies/sync`,
+          { movies: moviesPayload },
+          { headers: { 'x-admin-secret': ADMIN_SECRET, 'Content-Type': 'application/json' } }
+        );
+
+        const resData = apiRes.data;
+        addLog(`Sucesso no PostgreSQL! Inseridos: ${resData.inserted} | Atualizados: ${resData.updated} | Ignorados: ${resData.skipped}`, 'success');
         setSyncModal({
           type: 'success',
-          text: `Sincronização Concluída!\n\n${inserted} novo(s) filme(s) adicionado(s) com sucesso ao Firestore.\n${skipped} duplicatas evitadas com proteção inteligente.`
+          text: `Sincronização PostgreSQL Concluída!\n\n🎬 Filmes novos inseridos: ${resData.inserted}\n🔄 Filmes atualizados: ${resData.updated}\n🛡️ Duplicatas evitadas: ${resData.skipped}`
         });
       } else {
-        // --- SYNC DELTA DE SÉRIES E NOVOS EPISÓDIOS ---
-        addLog(`Preparando payload de séries e episódios para envio à API PostgreSQL...`, 'info');
+        // --- SYNC EM LOTE DE SÉRIES (POSTGRESQL) ---
+        addLog(`Preparando payload de séries para envio à API PostgreSQL...`, 'info');
         const seriesPayload = [];
 
         for (let i = 0; i < itemsToProcess.length; i++) {
           const item = itemsToProcess[i];
 
           if (item.status === 'new') {
-            // Série Nova: busca capa no TMDB
-            addLog(`Buscando dados no TMDB para nova série: "${item.cleanName}"...`, 'info');
+            addLog(`Buscando no TMDB para nova série: "${item.cleanName}"...`, 'info');
             try {
               const tmdbResp = await axios.get(`https://api.themoviedb.org/3/search/tv?api_key=${baserowConfig?.tmdbKey || DEFAULT_TMDB_KEY}&language=pt-BR&query=${encodeURIComponent(item.cleanName)}`);
               
@@ -732,15 +695,12 @@ function BaserowSync() {
                   isHighlight: false,
                   episodes: item.episodes
                 });
-                addLog(`TMDB OK para "${tmdbData.name}": ${item.episodes.length} episódios prontos.`, 'success');
               }
             } catch (err) {
               addLog(`Erro no TMDB para "${item.cleanName}": ${err.message}`, 'error');
             }
-            await new Promise(r => setTimeout(r, 120));
+            await new Promise(r => setTimeout(r, 60));
           } else {
-            // Série Existente com Novos Episódios: envia apenas os episódios faltantes
-            addLog(`Série existente "${item.title}": enviando ${item.newEpisodesList.length} episódio(s) faltante(s)...`, 'info');
             seriesPayload.push({
               tmdbId: item.tmdbId,
               title: item.title,
@@ -763,8 +723,7 @@ function BaserowSync() {
           return;
         }
 
-        addLog(`Enviando ${seriesPayload.length} série(s) e seus episódios para o PostgreSQL (${SERIES_API_URL}/series/sync)...`, 'info');
-        
+        addLog(`Enviando ${seriesPayload.length} série(s) para o PostgreSQL (${SERIES_API_URL}/series/sync)...`, 'info');
         const apiResponse = await axios.post(
           `${SERIES_API_URL}/series/sync`,
           { series: seriesPayload },
@@ -772,14 +731,11 @@ function BaserowSync() {
         );
 
         const result = apiResponse.data;
-        addLog(`Sucesso no PostgreSQL! Séries sincronizadas: ${result.insertedSeries} | Novos episódios: ${result.insertedEpisodes} | Episódios mantidos: ${result.skippedEpisodes}`, 'success');
+        addLog(`Sucesso no PostgreSQL! Séries: ${result.insertedSeries} | Novos episódios: ${result.insertedEpisodes} | Mantidos: ${result.skippedEpisodes}`, 'success');
 
         setSyncModal({
           type: 'success',
-          text: `Sincronização PostgreSQL Concluída!\n\n` +
-                `📺 Séries processadas: ${result.insertedSeries}\n` +
-                `🎬 Novos episódios inseridos: ${result.insertedEpisodes}\n` +
-                `🛡️ Episódios existentes preservados: ${result.skippedEpisodes}`
+          text: `Sincronização de Séries Concluída!\n\n📺 Séries processadas: ${result.insertedSeries}\n🎬 Novos episódios inseridos: ${result.insertedEpisodes}\n🛡️ Episódios preservados: ${result.skippedEpisodes}`
         });
       }
 
@@ -794,84 +750,79 @@ function BaserowSync() {
   };
 
   /**
-   * 3. Limpeza de Duplicatas no Firestore (One-Click Cleanup)
+   * 3. Migração 1-Clique: Transfere Filmes do Firestore para o PostgreSQL
    */
-  const handleDeduplicateFirestore = async () => {
-    if (!window.confirm("Deseja verificar e remover filmes duplicados existentes no Firestore?\n\nO sistema manterá a primeira cópia de cada filme e removerá apenas as repetições (por link ou TMDB).")) {
+  const handleMigrateFirestoreToPostgres = async () => {
+    if (!window.confirm("Deseja migrar todos os filmes existentes do Firestore para o banco PostgreSQL?\n\nIsso garantirá que todos os seus 2.200+ filmes fiquem centralizados no mesmo banco de alta performance das séries sem perder nenhum dado.")) {
       return;
     }
 
     setIsLoading(true);
-    addLog("Iniciando varredura de filmes duplicados no Firestore...", 'info');
+    addLog("Iniciando migração de Filmes do Firestore -> PostgreSQL...", 'info');
 
     try {
       const snap = await getDocs(collection(db, 'movies'));
-      addLog(`Total de documentos analisados: ${snap.size}`, 'info');
+      addLog(`Lendo ${snap.size} documentos do Firestore...`, 'info');
 
-      const seenUrls = new Map();
-      const seenTmdb = new Map();
-      const duplicatesToDelete = [];
-
+      const uniqueMoviesMap = new Map();
       snap.forEach(docSnap => {
         const d = docSnap.data();
-        const id = docSnap.id;
-        const url = (d.videoUrl || '').trim().toLowerCase();
-        const tmdb = d.tmdbId ? String(d.tmdbId) : null;
-
-        let isDup = false;
-        if (url && seenUrls.has(url)) {
-          duplicatesToDelete.push(id);
-          isDup = true;
-        } else if (url) {
-          seenUrls.set(url, id);
-        }
-
-        if (!isDup && tmdb && seenTmdb.has(tmdb)) {
-          duplicatesToDelete.push(id);
-          isDup = true;
-        } else if (!isDup && tmdb) {
-          seenTmdb.set(tmdb, id);
+        const url = (d.videoUrl || '').trim();
+        if (url && !uniqueMoviesMap.has(url.toLowerCase())) {
+          uniqueMoviesMap.set(url.toLowerCase(), {
+            tmdbId: d.tmdbId ? parseInt(d.tmdbId, 10) : null,
+            title: d.title || 'Sem Título',
+            overview: d.overview || '',
+            posterPath: d.posterPath || null,
+            backdropPath: d.backdropPath || null,
+            voteAverage: d.voteAverage ? parseFloat(d.voteAverage) : 0,
+            releaseDate: d.releaseDate || null,
+            videoUrl: url,
+            tags: Array.isArray(d.tags) ? d.tags : [],
+            isHighlight: Boolean(d.isHighlight),
+            source: d.source || 'firestore_migrated',
+            baserowRowId: d.baserowRowId || null
+          });
         }
       });
 
-      if (duplicatesToDelete.length === 0) {
-        addLog("Nenhuma duplicata encontrada! O catálogo do Firestore está 100% limpo.", 'success');
-        setSyncModal({ type: 'success', text: "Nenhuma duplicata encontrada! O catálogo está limpo." });
-        setIsLoading(false);
-        return;
+      const moviesToMigrate = Array.from(uniqueMoviesMap.values());
+      addLog(`${moviesToMigrate.length} filmes únicos preparados para inserção no PostgreSQL.`, 'info');
+
+      const BATCH_SIZE = 150;
+      let totalInserted = 0;
+      let totalUpdated = 0;
+
+      for (let i = 0; i < moviesToMigrate.length; i += BATCH_SIZE) {
+        const chunk = moviesToMigrate.slice(i, i + BATCH_SIZE);
+        addLog(`Enviando lote [${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(moviesToMigrate.length / BATCH_SIZE)}] (${chunk.length} filmes)...`, 'info');
+
+        const res = await axios.post(
+          `${SERIES_API_URL}/movies/sync`,
+          { movies: chunk },
+          { headers: { 'x-admin-secret': ADMIN_SECRET, 'Content-Type': 'application/json' } }
+        );
+
+        totalInserted += res.data.inserted || 0;
+        totalUpdated += res.data.updated || 0;
       }
 
-      addLog(`Detectadas ${duplicatesToDelete.length} duplicatas. Removendo com segurança em lotes...`, 'warn');
-
-      const BATCH_SIZE = 350;
-      for (let i = 0; i < duplicatesToDelete.length; i += BATCH_SIZE) {
-        const batch = writeBatch(db);
-        const chunk = duplicatesToDelete.slice(i, i + BATCH_SIZE);
-        chunk.forEach(docId => {
-          batch.delete(doc(db, 'movies', docId));
-        });
-        await batch.commit();
-        addLog(`Removidas ${Math.min(i + BATCH_SIZE, duplicatesToDelete.length)} de ${duplicatesToDelete.length} duplicatas...`, 'info');
-      }
-
-      addLog(`Limpeza concluída! ${duplicatesToDelete.length} filmes repetidos foram removidos com sucesso.`, 'success');
+      addLog(`MIGRAÇÃO CONCLUÍDA! Total inseridos: ${totalInserted} | Atualizados: ${totalUpdated}`, 'success');
       setSyncModal({
         type: 'success',
-        text: `Limpeza Concluída com Sucesso!\n\n${duplicatesToDelete.length} filmes repetidos foram removidos do Firestore.\nAgora cada filme possui apenas um registro único.`
+        text: `Migração para o PostgreSQL Concluída com Sucesso!\n\n${totalInserted} filmes inseridos.\n${totalUpdated} filmes atualizados.\nAgora o PostgreSQL possui todo o catálogo de filmes unificado!`
       });
 
-      // Atualiza diagnóstico automaticamente
       handleLiveCheck();
     } catch (err) {
-      console.error("Erro na limpeza de duplicatas:", err);
-      addLog(`Erro ao limpar duplicatas: ${err.message}`, 'error');
-      setSyncModal({ type: 'error', text: `Erro ao limpar duplicatas: ${err.message}` });
+      console.error(err);
+      addLog(`Erro durante a migração: ${err.message}`, 'error');
+      setSyncModal({ type: 'error', text: `Erro na migração: ${err.message}` });
     } finally {
       setIsLoading(false);
     }
   };
 
-  // Filtragem na Tabela
   const filteredItems = items.filter(item => {
     if (filterMode === 'new' && item.status !== 'new') return false;
     if (filterMode === 'new_episodes' && item.status !== 'new_episodes') return false;
@@ -888,7 +839,6 @@ function BaserowSync() {
     return true;
   });
 
-  // Cálculos de Paginação
   const totalPages = Math.max(1, Math.ceil(filteredItems.length / itemsPerPage));
   const validCurrentPage = Math.min(Math.max(1, currentPage), totalPages);
   const startIndex = (validCurrentPage - 1) * itemsPerPage;
@@ -904,7 +854,7 @@ function BaserowSync() {
             Sincronização Inteligente Baserow
           </h1>
           <p style={{ color: 'var(--text-secondary)', margin: 0, fontSize: '0.95rem' }}>
-            Detecção precisa de novidades, proteção anti-duplicação e sincronização delta em tempo real.
+            Banco de Dados Unificado PostgreSQL: Sincronização atômica instantânea sem perdas.
           </p>
         </div>
 
@@ -933,7 +883,7 @@ function BaserowSync() {
             }}
           >
             <Film size={18} />
-            Filmes (Firestore)
+            Filmes (PostgreSQL)
           </button>
           <button
             onClick={() => { setSyncType('series'); setItems([]); }}
@@ -970,10 +920,10 @@ function BaserowSync() {
           </div>
           <div>
             <div style={{ fontWeight: 700, fontSize: '1.1rem', color: 'white' }}>
-              Conexão: Baserow API
+              Conexão: Baserow API ➔ Banco PostgreSQL
             </div>
             <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: '2px' }}>
-              URL: <code style={{ color: 'var(--accent)' }}>{baserowConfig?.baseUrl || 'https://db.leflow.com.br/api'}</code> • 
+              Destino: <code style={{ color: 'var(--accent)' }}>https://series.leflow.com.br/{syncType === 'movie' ? 'movies' : 'series'}</code> • 
               Tabela {syncType === 'movie' ? 'Filmes' : 'Séries'}: <strong style={{ color: 'white' }}>{syncType === 'movie' ? baserowConfig?.moviesTableId : baserowConfig?.seriesTableId}</strong>
             </div>
           </div>
@@ -982,14 +932,14 @@ function BaserowSync() {
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
           {syncType === 'movie' && (
             <button
-              onClick={handleDeduplicateFirestore}
+              onClick={handleMigrateFirestoreToPostgres}
               disabled={isLoading}
               className="btn-secondary"
-              style={{ borderRadius: '12px', color: '#FBBF24', borderColor: 'rgba(245, 158, 11, 0.3)' }}
-              title="Varre e remove filmes duplicados no Firestore"
+              style={{ borderRadius: '12px', color: 'var(--accent)', borderColor: 'rgba(0, 212, 255, 0.3)' }}
+              title="Copia os filmes do Firestore para a tabela PostgreSQL"
             >
-              <Trash2 size={16} />
-              Limpar Duplicados no Firestore
+              <ArrowRightLeft size={16} />
+              Migrar Firestore ➔ PostgreSQL
             </button>
           )}
 
@@ -1012,7 +962,7 @@ function BaserowSync() {
             >
               <Zap size={18} />
               {isLoading && activeStep === 'syncing' 
-                ? 'Sincronizando...' 
+                ? 'Sincronizando no PostgreSQL...' 
                 : `Sincronizar Novidades (${stats.newItems + stats.newEpisodes + stats.incompleteSeries})`
               }
             </button>
@@ -1067,7 +1017,7 @@ function BaserowSync() {
         </div>
       )}
 
-      {/* TERMINAL DE LOGS AO VIVO (COM CONTROLES E SEM SCROLL NA JANELA) */}
+      {/* TERMINAL DE LOGS AO VIVO */}
       {liveLogs.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
@@ -1130,7 +1080,6 @@ function BaserowSync() {
       {/* TABELA DE ITENS COM FILTROS & PAGINAÇÃO */}
       {items.length > 0 && (
         <div className="glass-card" style={{ padding: '20px' }}>
-          {/* Barra de Filtros e Busca */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', marginBottom: '20px' }}>
             <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
               <button
@@ -1265,7 +1214,6 @@ function BaserowSync() {
                         </td>
                       </tr>
 
-                      {/* Visualização detalhada de episódios */}
                       {syncType === 'series' && isExpanded && (
                         <tr style={{ background: 'rgba(0, 0, 0, 0.3)' }}>
                           <td colSpan={5} style={{ padding: '16px 24px' }}>
@@ -1318,7 +1266,7 @@ function BaserowSync() {
             </table>
           </div>
 
-          {/* BARRA DE PAGINAÇÃO COMPLETA E ELEGANTE */}
+          {/* BARRA DE PAGINAÇÃO COMPLETA */}
           <div className="pagination-container" style={{ marginTop: '14px', borderRadius: '12px' }}>
             <div className="pagination-info">
               Mostrando <strong style={{ color: 'var(--text-primary)' }}>{filteredItems.length === 0 ? 0 : startIndex + 1}</strong> até <strong style={{ color: 'var(--text-primary)' }}>{Math.min(startIndex + itemsPerPage, filteredItems.length)}</strong> de <strong style={{ color: 'var(--text-primary)' }}>{filteredItems.length}</strong> {syncType === 'movie' ? 'filmes' : 'séries'}
@@ -1363,9 +1311,7 @@ function BaserowSync() {
                 </button>
 
                 {Array.from({ length: totalPages }, (_, i) => i + 1)
-                  .filter(page => {
-                    return page === 1 || page === totalPages || Math.abs(page - validCurrentPage) <= 2;
-                  })
+                  .filter(page => page === 1 || page === totalPages || Math.abs(page - validCurrentPage) <= 2)
                   .map((page, idx, arr) => {
                     const prevPage = arr[idx - 1];
                     const showEllipsis = prevPage && page - prevPage > 1;

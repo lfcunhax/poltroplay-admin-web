@@ -26,8 +26,8 @@ import TermsOfService from './screens/TermsOfService';
 import AboutPage from './screens/AboutPage';
 
 function SystemStatusCards() {
-  const [pgOnline, setPgOnline] = useState(true);
-  const [firestoreOnline, setFirestoreOnline] = useState(true);
+  const [pgSeriesOnline, setPgSeriesOnline] = useState(true);
+  const [pgMoviesOnline, setPgMoviesOnline] = useState(true);
 
   useEffect(() => {
     let isMounted = true;
@@ -36,17 +36,17 @@ function SystemStatusCards() {
       // 1. Check PostgreSQL Series API
       try {
         const res = await axios.get('https://series.leflow.com.br/series?limit=1', { timeout: 6000 });
-        if (isMounted) setPgOnline(res.status === 200);
+        if (isMounted) setPgSeriesOnline(res.status === 200);
       } catch (err) {
-        if (isMounted) setPgOnline(false);
+        if (isMounted) setPgSeriesOnline(false);
       }
 
-      // 2. Check Firestore
+      // 2. Check PostgreSQL Movies API
       try {
-        await getDocs(query(collection(db, 'movies'), limit(1)));
-        if (isMounted) setFirestoreOnline(true);
+        const res = await axios.get('https://series.leflow.com.br/movies?limit=1', { timeout: 6000 });
+        if (isMounted) setPgMoviesOnline(res.status === 200);
       } catch (err) {
-        if (isMounted) setFirestoreOnline(false);
+        if (isMounted) setPgMoviesOnline(false);
       }
     };
 
@@ -61,20 +61,20 @@ function SystemStatusCards() {
 
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-      {/* PostgreSQL Status Card */}
+      {/* PostgreSQL Séries */}
       <div 
-        className={`db-status-card ${pgOnline ? 'online' : 'offline'}`}
-        title={`PostgreSQL Séries: ${pgOnline ? 'Conexão ativa e operando normalmente' : 'Sem resposta no momento'}`}
+        className={`db-status-card ${pgSeriesOnline ? 'online' : 'offline'}`}
+        title={`PostgreSQL Séries: ${pgSeriesOnline ? 'Conexão ativa e operando normalmente' : 'Sem resposta no momento'}`}
       >
         <div style={{
           width: '30px',
           height: '30px',
           borderRadius: '9px',
-          background: pgOnline ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+          background: pgSeriesOnline ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          color: pgOnline ? '#10B981' : '#EF4444',
+          color: pgSeriesOnline ? '#10B981' : '#EF4444',
           flexShrink: 0
         }}>
           <Server size={16} />
@@ -84,40 +84,40 @@ function SystemStatusCards() {
             PostgreSQL Séries
           </span>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <span className={pgOnline ? 'status-dot-online' : 'status-dot-offline'}></span>
-            <span style={{ fontSize: '0.72rem', fontWeight: 600, color: pgOnline ? '#10B981' : '#EF4444' }}>
-              {pgOnline ? 'Online' : 'Offline'}
+            <span className={pgSeriesOnline ? 'status-dot-online' : 'status-dot-offline'}></span>
+            <span style={{ fontSize: '0.72rem', fontWeight: 600, color: pgSeriesOnline ? '#10B981' : '#EF4444' }}>
+              {pgSeriesOnline ? 'Online' : 'Offline'}
             </span>
           </div>
         </div>
       </div>
 
-      {/* Firestore Status Card */}
+      {/* PostgreSQL Filmes */}
       <div 
-        className={`db-status-card ${firestoreOnline ? 'online' : 'offline'}`}
-        title={`Firestore Filmes: ${firestoreOnline ? 'Conexão ativa e operando normalmente' : 'Sem resposta no momento'}`}
+        className={`db-status-card ${pgMoviesOnline ? 'online' : 'offline'}`}
+        title={`PostgreSQL Filmes: ${pgMoviesOnline ? 'Conexão ativa e operando normalmente' : 'Aguardando deploy do endpoint /movies'}`}
       >
         <div style={{
           width: '30px',
           height: '30px',
           borderRadius: '9px',
-          background: firestoreOnline ? 'rgba(0, 212, 255, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+          background: pgMoviesOnline ? 'rgba(0, 212, 255, 0.15)' : 'rgba(239, 68, 68, 0.15)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          color: firestoreOnline ? '#00D4FF' : '#EF4444',
+          color: pgMoviesOnline ? '#00D4FF' : '#EF4444',
           flexShrink: 0
         }}>
           <Database size={16} />
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1px' }}>
           <span style={{ fontSize: '0.8rem', color: 'var(--text-primary)', fontWeight: 600, letterSpacing: '-0.01em' }}>
-            Firestore Filmes
+            PostgreSQL Filmes
           </span>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <span className={firestoreOnline ? 'status-dot-online' : 'status-dot-offline'}></span>
-            <span style={{ fontSize: '0.72rem', fontWeight: 600, color: firestoreOnline ? '#00D4FF' : '#EF4444' }}>
-              {firestoreOnline ? 'Conectado' : 'Offline'}
+            <span className={pgMoviesOnline ? 'status-dot-online' : 'status-dot-offline'}></span>
+            <span style={{ fontSize: '0.72rem', fontWeight: 600, color: pgMoviesOnline ? '#00D4FF' : '#EF4444' }}>
+              {pgMoviesOnline ? 'Online' : 'Offline'}
             </span>
           </div>
         </div>

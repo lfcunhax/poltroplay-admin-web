@@ -68,21 +68,32 @@ function Dashboard() {
     const fetchStats = async () => {
       setIsLoading(true);
       try {
-        // Filmes do Firestore
-        const moviesCountSnap = await getCountFromServer(collection(db, 'movies')).catch(() => null);
+        // Usuários do Firebase Auth/Firestore
         const usersCountSnap = await getCountFromServer(collection(db, 'users')).catch(() => null);
-
-        let moviesCount = moviesCountSnap?.data()?.count || 0;
         let usersCount = usersCountSnap?.data()?.count || 0;
 
         // Séries da API PostgreSQL
         let seriesCount = 0;
         try {
-          const sRes = await axios.get(`${SERIES_API_URL}/series?limit=1`);
+          const sRes = await axios.get(`${SERIES_API_URL}/series?limit=1`, { timeout: 6000 });
           seriesCount = sRes.data?.total || 0;
         } catch (_) {}
 
-        // Busca amostra para Top Mais Assistidos
+        // Filmes da API PostgreSQL (com fallback Firestore)
+        let moviesCount = 0;
+        try {
+          const mRes = await axios.get(`${SERIES_API_URL}/movies?limit=1`, { timeout: 6000 });
+          if (mRes.data && typeof mRes.data.total === 'number') {
+            moviesCount = mRes.data.total;
+          }
+        } catch (_) {}
+
+        if (moviesCount === 0) {
+          const moviesCountSnap = await getCountFromServer(collection(db, 'movies')).catch(() => null);
+          moviesCount = moviesCountSnap?.data()?.count || 0;
+        }
+
+        // Amostra de conteúdos para ranking
         let allContent = [];
         let totalViews = 0;
         try {
@@ -130,7 +141,7 @@ function Dashboard() {
             Visão Geral do Sistema
           </h1>
           <p style={{ color: 'var(--text-secondary)', fontSize: '0.95rem', margin: 0 }}>
-            Métricas em tempo real do catálogo de filmes, séries no PostgreSQL e usuários.
+            Métricas em tempo real do catálogo unificado de filmes e séries no PostgreSQL.
           </p>
         </div>
 
@@ -147,7 +158,7 @@ function Dashboard() {
         gap: '20px'
       }}>
         <StatCard 
-          title="Filmes no Firestore" 
+          title="Filmes no Catálogo" 
           value={isLoading ? '...' : stats.movies} 
           icon={<Film size={28} />} 
           color="#7B2FF7" 

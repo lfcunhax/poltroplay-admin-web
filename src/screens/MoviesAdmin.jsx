@@ -1,587 +1,416 @@
 import React, { useState, useEffect } from 'react';
-import { db } from '../firebase';
-import { 
-  collection, getDocs, addDoc, serverTimestamp, deleteDoc, doc, 
-  query, where, updateDoc, getCountFromServer, limit, startAfter, orderBy 
-} from 'firebase/firestore';
 import axios from 'axios';
-import { Plus, Search, Trash2, Video, Edit2, Star, Film, ChevronLeft, ChevronRight } from 'lucide-react';
+import { 
+  Film, Plus, Search, Trash2, Edit2, Star, 
+  ChevronLeft, ChevronRight, RefreshCw, X, Play, ExternalLink 
+} from 'lucide-react';
 
+const SERIES_API_URL = 'https://series.leflow.com.br';
+const ADMIN_SECRET = 'poltroplay_admin_2026';
 const TMDB_API_KEY = '384caf4e90af984a7c5595ea5d9bb386';
 const PAGE_SIZE = 20;
 
 function MoviesAdmin() {
   const [movies, setMovies] = useState([]);
-  const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
-  
-  // Paginação e Contadores
   const [totalMovies, setTotalMovies] = useState(0);
-  const [page, setPage] = useState(1);
-  const [pageHistory, setPageHistory] = useState([null]); // Guarda os cursores (lastVisible) de cada página
-  const [hasMore, setHasMore] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [searchTerm, setSearchTerm] = useState('');
 
-  // Modals state
+  // Modal Novo Filme
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
-  
-  // Add Form state
-  const [tmdbId, setTmdbId] = useState('');
-  const [preview, setPreview] = useState(null);
-  const [videoUrl, setVideoUrl] = useState('');
-  const [tags, setTags] = useState([]); 
-  const [isHighlightAdd, setIsHighlightAdd] = useState(false);
-  const [isNewRelease, setIsNewRelease] = useState(true);
-  const [isSearching, setIsSearching] = useState(false);
+  const [tmdbIdInput, setTmdbIdInput] = useState('');
+  const [videoUrlInput, setVideoUrlInput] = useState('');
+  const [tmdbPreview, setTmdbPreview] = useState(null);
+  const [isSearchingTmdb, setIsSearchingTmdb] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
-  // Edit Form state
-  const [editingId, setEditingId] = useState(null);
-  const [editForm, setEditForm] = useState({
-    title: '', overview: '', videoUrl: '', tags: [], isHighlight: false, posterPath: ''
-  });
-
   useEffect(() => {
-    fetchTotalCount();
-    fetchMovies(null); // primeira página
-    fetchCategories();
+    fetchMovies(1, searchTerm);
   }, []);
 
-  const fetchTotalCount = async () => {
-    try {
-      const coll = collection(db, 'movies');
-      const snapshot = await getCountFromServer(coll);
-      setTotalMovies(snapshot.data().count);
-    } catch (e) {
-      console.error("Erro ao buscar total:", e);
-    }
-  };
-
-  const fetchMovies = async (startAfterDoc) => {
+  const fetchMovies = async (page = 1, search = '') => {
     setLoading(true);
     try {
-      let q = query(
-        collection(db, 'movies'),
-        orderBy('createdAt', 'desc'),
-        limit(PAGE_SIZE)
-      );
-
-      if (startAfterDoc) {
-        q = query(q, startAfter(startAfterDoc));
-      }
-
-      const querySnapshot = await getDocs(q);
-      const moviesList = querySnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-
-      setMovies(moviesList);
-      
-      // Verifica se tem mais para a próxima página
-      if (querySnapshot.docs.length === PAGE_SIZE) {
-        const lastDoc = querySnapshot.docs[querySnapshot.docs.length - 1];
-        setHasMore(true);
-        
-        // Atualiza histórico se estivermos indo pra frente
-        if (pageHistory.length === page) {
-          setPageHistory([...pageHistory, lastDoc]);
-        }
-      } else {
-        setHasMore(false);
-      }
-    } catch (error) {
-      console.error("Error fetching movies: ", error);
+      const url = `${SERIES_API_URL}/movies?page=${page}&limit=${PAGE_SIZE}${search.trim() ? `&search=${encodeURIComponent(search.trim())}` : ''}`;
+      const res = await axios.get(url);
+      const data = res.data || {};
+      setMovies(data.movies || []);
+      setTotalMovies(data.total || 0);
+      setCurrentPage(data.page || 1);
+      setTotalPages(data.totalPages || 1);
+    } catch (err) {
+      console.error("Erro ao buscar filmes:", err);
     } finally {
       setLoading(false);
     }
   };
 
-  const goToNextPage = () => {
-    if (!hasMore) return;
-    const currentCursor = pageHistory[page]; // O cursor para iniciar a próxima página
-    setPage(page + 1);
-    fetchMovies(currentCursor);
+  const handleSearchSubmit = (e) => {
+    e.preventDefault();
+    fetchMovies(1, searchTerm);
   };
 
-  const goToPrevPage = () => {
-    if (page <= 1) return;
-    const prevPage = page - 1;
-    setPage(prevPage);
-    // Para ir para a pág anterior, usamos o cursor guardado no index (prevPage - 1)
-    const cursor = prevPage === 1 ? null : pageHistory[prevPage - 1];
-    fetchMovies(cursor);
-  };
+  const handleDelete = async (id, title) => {
+    if (!window.confirm(`Tem certeza que deseja excluir permanentemente o filme "${title}" do PostgreSQL?`)) {
+      return;
+    }
 
-  const fetchCategories = async () => {
     try {
-      const snap = await getDocs(collection(db, 'categories'));
-      const cats = snap.docs.map(doc => doc.data().name);
-      setCategories(cats.sort());
-    } catch (error) {
-      console.error("Error fetching categories: ", error);
+      await axios.delete(`${SERIES_API_URL}/movies/${id}`, {
+        headers: { 'x-admin-secret': ADMIN_SECRET }
+      });
+      alert(`Filme "${title}" removido com sucesso.`);
+      fetchMovies(currentPage, searchTerm);
+    } catch (err) {
+      console.error("Erro ao deletar filme:", err);
+      alert("Erro ao excluir filme: " + err.message);
     }
   };
 
   const searchTmdb = async () => {
-    if (!tmdbId) return;
-    setIsSearching(true);
+    if (!tmdbIdInput.trim()) return;
+    setIsSearchingTmdb(true);
+    setTmdbPreview(null);
     try {
-      const response = await axios.get(`https://api.themoviedb.org/3/movie/${tmdbId}?api_key=${TMDB_API_KEY}&language=pt-BR`);
-      setPreview(response.data);
-      
-      const genreMap = {
-        28: 'Ação', 12: 'Aventura', 16: 'Animação', 35: 'Comédia', 80: 'Crime',
-        99: 'Documentário', 18: 'Drama', 10751: 'Família', 14: 'Fantasia',
-        36: 'História', 27: 'Terror', 10402: 'Música', 9648: 'Mistério',
-        10749: 'Romance', 878: 'Ficção Científica', 10770: 'Cinema TV',
-        53: 'Thriller', 10752: 'Guerra', 37: 'Faroeste'
-      };
-      const tmdbData = response.data;
-      const genreNames = tmdbData.genres 
-        ? tmdbData.genres.map(g => g.name)
-        : (tmdbData.genre_ids || []).map(id => genreMap[id]);
-      const validGenreNames = genreNames.filter(name => name);
-      const relYear = tmdbData.release_date ? parseInt(tmdbData.release_date.split('-')[0]) : 0; 
-      const isRecent = relYear >= new Date().getFullYear() - 1; 
-      setTags([...new Set([...(isRecent ? ['recent'] : []), ...validGenreNames])]);
-
-    } catch (error) {
-      alert("Filme não encontrado no TMDB. Verifique o ID.");
-      setPreview(null);
+      const res = await axios.get(`https://api.themoviedb.org/3/movie/${tmdbIdInput.trim()}?api_key=${TMDB_API_KEY}&language=pt-BR`);
+      setTmdbPreview(res.data);
+    } catch (err) {
+      alert("Filme não encontrado no TMDB com este ID.");
     } finally {
-      setIsSearching(false);
+      setIsSearchingTmdb(false);
     }
   };
 
-  const handleSaveMovie = async () => {
-    if (!preview || !videoUrl) {
-      alert("Por favor, importe um filme e cole a URL do vídeo.");
+  const handleSaveNewMovie = async () => {
+    if (!tmdbPreview || !videoUrlInput.trim()) {
+      alert("Busque o filme no TMDB e informe a URL de reprodução do vídeo.");
       return;
     }
+
     setIsSaving(true);
     try {
-      const q = query(collection(db, 'movies'), where('tmdbId', '==', preview.id));
-      const querySnapshot = await getDocs(q);
-      if (!querySnapshot.empty) {
-        alert("Este filme já está cadastrado no banco de dados!");
-        setIsSaving(false);
-        return;
-      }
-      
-      const missingCategories = tags.filter(tag => !categories.includes(tag));
-      for (const newCat of missingCategories) {
-        await addDoc(collection(db, 'categories'), {
-          name: newCat,
-          createdAt: serverTimestamp()
-        });
-      }
-
-      const lowerTitle = (preview.title || '').toLowerCase();
-      
-      const docRef = await addDoc(collection(db, 'movies'), {
-        tmdbId: preview.id || null,
-        title: preview.title || '',
-        titleLower: lowerTitle,
-        overview: preview.overview || '',
-        posterPath: preview.poster_path || null,
-        backdropPath: preview.backdrop_path || null,
-        voteAverage: preview.vote_average || 0,
-        releaseDate: preview.release_date || null,
-        videoUrl: videoUrl || '',
-        tags: tags,
-        isHighlight: isHighlightAdd,
-        createdAt: serverTimestamp()
+      const genreNames = (tmdbPreview.genres || []).map(g => g.name);
+      await axios.post(`${SERIES_API_URL}/movies`, {
+        tmdbId: tmdbPreview.id,
+        title: tmdbPreview.title,
+        overview: tmdbPreview.overview || '',
+        posterPath: tmdbPreview.poster_path || null,
+        backdropPath: tmdbPreview.backdrop_path || null,
+        voteAverage: tmdbPreview.vote_average || 0,
+        releaseDate: tmdbPreview.release_date || null,
+        videoUrl: videoUrlInput.trim(),
+        tags: genreNames,
+        isHighlight: false
+      }, {
+        headers: { 'x-admin-secret': ADMIN_SECRET }
       });
 
-      if (isNewRelease) {
-        try {
-          const itemTitle = preview.title;
-          const imageUrl = preview.backdrop_path ? `https://image.tmdb.org/t/p/w780${preview.backdrop_path}` : (preview.poster_path ? `https://image.tmdb.org/t/p/w500${preview.poster_path}` : '');
-          
-          await addDoc(collection(db, 'notifications'), {
-            title: `Novo Lançamento: ${itemTitle}`,
-            body: `${itemTitle} já está disponível no PoltroPlay. Venha assistir agora mesmo!`,
-            imageUrl: imageUrl,
-            contentId: docRef.id,
-            contentType: 'movie',
-            createdAt: serverTimestamp(),
-            status: 'sent' 
-          });
-        } catch (e) {
-          console.error("Erro ao enviar notificação de lançamento:", e);
-        }
-      }
-
-      alert("Filme salvo com sucesso!");
+      alert(`Filme "${tmdbPreview.title}" adicionado com sucesso ao PostgreSQL!`);
       setIsAddModalOpen(false);
-      resetAddForm();
-      // Atualiza e volta pra primeira página
-      setPage(1);
-      setPageHistory([null]);
-      fetchTotalCount();
-      fetchMovies(null);
-      fetchCategories();
-    } catch (error) {
-      alert("Erro ao salvar filme.");
+      setTmdbIdInput('');
+      setVideoUrlInput('');
+      setTmdbPreview(null);
+      fetchMovies(1, '');
+    } catch (err) {
+      alert("Erro ao salvar filme: " + (err.response?.data?.error || err.message));
     } finally {
       setIsSaving(false);
     }
   };
-
-  const openEdit = (movie) => {
-    setEditingId(movie.id);
-    setEditForm({
-      title: movie.title || '',
-      overview: movie.overview || '',
-      videoUrl: movie.videoUrl || '',
-      tags: movie.tags || [],
-      isHighlight: movie.isHighlight || false,
-      posterPath: movie.posterPath || ''
-    });
-    setIsEditModalOpen(true);
-  };
-
-  const handleUpdateMovie = async () => {
-    setIsSaving(true);
-    try {
-      const missingCategories = editForm.tags.filter(tag => !categories.includes(tag));
-      for (const newCat of missingCategories) {
-        await addDoc(collection(db, 'categories'), {
-          name: newCat,
-          createdAt: serverTimestamp()
-        });
-      }
-
-      await updateDoc(doc(db, 'movies', editingId), {
-        title: editForm.title,
-        titleLower: editForm.title.toLowerCase(),
-        overview: editForm.overview,
-        videoUrl: editForm.videoUrl,
-        tags: editForm.tags,
-        isHighlight: editForm.isHighlight
-      });
-      
-      alert("Filme atualizado com sucesso!");
-      setIsEditModalOpen(false);
-      // Recarrega a página atual
-      const cursor = page === 1 ? null : pageHistory[page - 1];
-      fetchMovies(cursor);
-      fetchCategories();
-    } catch (error) {
-      alert("Erro ao atualizar filme.");
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  const handleDelete = async (id) => {
-    if (window.confirm("Tem certeza que deseja excluir este filme?")) {
-      await deleteDoc(doc(db, 'movies', id));
-      fetchTotalCount();
-      // Recarrega a página atual
-      const cursor = page === 1 ? null : pageHistory[page - 1];
-      fetchMovies(cursor);
-    }
-  };
-
-  const resetAddForm = () => {
-    setTmdbId('');
-    setPreview(null);
-    setVideoUrl('');
-    setTags([]);
-    setIsHighlightAdd(false);
-    setIsNewRelease(true);
-  };
-
-  const toggleTag = (tag, isEdit = false) => {
-    if (isEdit) {
-      if (editForm.tags.includes(tag)) {
-        setEditForm({ ...editForm, tags: editForm.tags.filter(t => t !== tag) });
-      } else {
-        setEditForm({ ...editForm, tags: [...editForm.tags, tag] });
-      }
-    } else {
-      if (tags.includes(tag)) {
-        setTags(tags.filter(t => t !== tag));
-      } else {
-        setTags([...tags, tag]);
-      }
-    }
-  };
-
-  const renderTagsSelector = (currentTags, isEdit = false) => (
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', padding: '12px', background: 'rgba(0,0,0,0.2)', borderRadius: '8px', border: '1px solid var(--surface-light)' }}>
-      {categories.length === 0 ? <span style={{ color: 'var(--text-muted)' }}>Nenhuma categoria cadastrada.</span> : null}
-      {categories.map(cat => {
-        const isSelected = currentTags.includes(cat);
-        return (
-          <div 
-            key={cat} 
-            onClick={() => toggleTag(cat, isEdit)}
-            style={{
-              padding: '6px 12px',
-              borderRadius: '16px',
-              cursor: 'pointer',
-              fontSize: '12px',
-              fontWeight: '500',
-              backgroundColor: isSelected ? 'var(--primary)' : 'rgba(255,255,255,0.05)',
-              color: isSelected ? 'white' : 'var(--text-secondary)',
-              border: `1px solid ${isSelected ? 'var(--primary-light)' : 'rgba(255,255,255,0.1)'}`,
-              transition: 'all 0.2s'
-            }}
-          >
-            {cat}
-          </div>
-        );
-      })}
-    </div>
-  );
 
   return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '32px' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+      
+      {/* Cabeçalho */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px' }}>
         <div>
-          <h1 style={{ marginBottom: '8px' }}>Gerenciar Filmes</h1>
-          <p style={{ color: 'var(--text-secondary)' }}>Adicione filmes, defina destaques e categorias.</p>
+          <h1 style={{ fontSize: '2rem', fontWeight: 800, margin: '0 0 6px 0', letterSpacing: '-0.03em' }}>
+            Filmes Manuais
+          </h1>
+          <p style={{ color: 'var(--text-secondary)', margin: 0, fontSize: '0.95rem' }}>
+            Gerencie o catálogo de filmes hospedado no banco PostgreSQL de alta performance.
+          </p>
         </div>
-        
-        <div style={{ display: 'flex', gap: '16px' }}>
-          {/* Contador Total */}
-          <div className="glass-card" style={{ padding: '12px 24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <div style={{ background: 'rgba(123, 47, 247, 0.2)', padding: '10px', borderRadius: '12px' }}>
-              <Film size={24} color="var(--primary-light)" />
-            </div>
-            <div>
-              <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Total de Filmes</div>
-              <div style={{ fontSize: '24px', fontWeight: 'bold' }}>{totalMovies}</div>
-            </div>
-          </div>
 
-          <button className="btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '8px', height: 'fit-content' }} onClick={() => setIsAddModalOpen(true)}>
-            <Plus size={20} />
+        <div style={{ display: 'flex', gap: '12px' }}>
+          <button 
+            className="btn-secondary" 
+            onClick={() => fetchMovies(currentPage, searchTerm)} 
+            disabled={loading}
+            style={{ borderRadius: '12px' }}
+          >
+            <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
+            Atualizar
+          </button>
+          <button 
+            className="btn-primary" 
+            onClick={() => setIsAddModalOpen(true)}
+            style={{ borderRadius: '12px' }}
+          >
+            <Plus size={18} />
             Novo Filme
           </button>
         </div>
       </div>
 
-      <div className="glass-card" style={{ padding: '0', overflow: 'hidden' }}>
-        {loading ? (
-          <div style={{ padding: '60px', textAlign: 'center', color: 'var(--text-muted)' }}>Carregando catálogo de filmes...</div>
-        ) : (
-          <>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', textAlign: 'left', background: 'rgba(0,0,0,0.2)' }}>
-                  <th style={{ padding: '16px 24px', color: 'var(--text-secondary)', fontWeight: '600' }}>Filme</th>
-                  <th style={{ padding: '16px 24px', color: 'var(--text-secondary)', fontWeight: '600' }}>Tags / Categorias</th>
-                  <th style={{ padding: '16px 24px', color: 'var(--text-secondary)', fontWeight: '600', width: '120px' }}>Ações</th>
+      {/* Estatísticas e Busca */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px' }}>
+        <div className="stat-card">
+          <div className="stat-icon-wrapper" style={{ background: 'rgba(0, 212, 255, 0.15)', color: 'var(--accent)' }}>
+            <Film size={24} />
+          </div>
+          <div className="stat-info">
+            <div className="stat-value">{totalMovies}</div>
+            <div className="stat-label">Total de Filmes no PostgreSQL</div>
+          </div>
+        </div>
+
+        <div className="glass-card" style={{ padding: '16px 20px', display: 'flex', alignItems: 'center' }}>
+          <form onSubmit={handleSearchSubmit} style={{ display: 'flex', width: '100%', gap: '10px' }}>
+            <div style={{ position: 'relative', flex: 1 }}>
+              <Search size={18} style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+              <input
+                type="text"
+                placeholder="Buscar filme por título..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                style={{ paddingLeft: '44px', borderRadius: '10px' }}
+              />
+            </div>
+            <button type="submit" className="btn-secondary" style={{ padding: '10px 18px', borderRadius: '10px' }}>
+              Buscar
+            </button>
+          </form>
+        </div>
+      </div>
+
+      {/* Tabela de Filmes com Bordas Suaves */}
+      {loading ? (
+        <div className="glass-card" style={{ textAlign: 'center', padding: '48px', color: 'var(--text-secondary)' }}>
+          <div className="status-dot-online" style={{ margin: '0 auto 16px' }}></div>
+          Carregando filmes do PostgreSQL...
+        </div>
+      ) : (
+        <div className="data-table-container">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Poster & Título</th>
+                <th>Tags / Gêneros</th>
+                <th>Nota</th>
+                <th>Link de Reprodução</th>
+                <th style={{ textAlign: 'right' }}>Ações</th>
+              </tr>
+            </thead>
+            <tbody>
+              {movies.length === 0 ? (
+                <tr>
+                  <td colSpan="5" style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
+                    Nenhum filme encontrado.
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {movies.length === 0 ? (
-                  <tr>
-                    <td colSpan="3" style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>
-                      Nenhum filme nesta página.
-                    </td>
-                  </tr>
-                ) : (
-                  movies.map(movie => (
-                    <tr key={movie.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', transition: 'background 0.2s' }} className="hover-row">
-                      <td style={{ padding: '16px 24px', display: 'flex', alignItems: 'center', gap: '16px' }}>
-                        <img 
-                          src={`https://image.tmdb.org/t/p/w92${movie.posterPath}`} 
-                          alt={movie.title} 
-                          style={{ width: '48px', height: '72px', objectFit: 'cover', borderRadius: '6px', boxShadow: '0 4px 8px rgba(0,0,0,0.3)' }}
-                        />
-                        <div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                            <span style={{ fontWeight: '500', fontSize: '15px' }}>{movie.title}</span>
-                            {movie.isHighlight && <Star size={14} color="#FFD700" fill="#FFD700" title="Destaque" />}
+              ) : (
+                movies.map(m => {
+                  const posterUrl = m.poster_path 
+                    ? (m.poster_path.startsWith('http') ? m.poster_path : `https://image.tmdb.org/t/p/w200${m.poster_path}`)
+                    : null;
+
+                  return (
+                    <tr key={m.id}>
+                      <td>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                          {posterUrl ? (
+                            <img 
+                              src={posterUrl} 
+                              alt={m.title} 
+                              style={{ width: '42px', height: '62px', borderRadius: '8px', objectFit: 'cover', border: '1px solid var(--surface-border)' }}
+                            />
+                          ) : (
+                            <div style={{ width: '42px', height: '62px', borderRadius: '8px', background: 'var(--surface-light)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>
+                              <Film size={20} />
+                            </div>
+                          )}
+                          <div>
+                            <div style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '0.95rem' }}>
+                              {m.title}
+                            </div>
+                            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                              ID: {m.id} | TMDB: {m.tmdb_id || 'N/A'}
+                            </div>
                           </div>
-                          <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>ID TMDB: {movie.tmdbId}</div>
                         </div>
                       </td>
-                      <td style={{ padding: '16px 24px' }}>
-                        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                          {movie.tags?.map(tag => (
-                            <span key={tag} style={{ background: 'rgba(123, 47, 247, 0.15)', color: 'var(--primary-light)', padding: '4px 10px', borderRadius: '6px', fontSize: '12px', border: '1px solid rgba(123, 47, 247, 0.3)' }}>
+
+                      <td>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', maxWidth: '220px' }}>
+                          {(m.tags || []).slice(0, 3).map((tag, tIdx) => (
+                            <span key={tIdx} className="badge badge-muted" style={{ fontSize: '0.7rem' }}>
                               {tag}
                             </span>
                           ))}
                         </div>
                       </td>
-                      <td style={{ padding: '16px 24px' }}>
-                        <div style={{ display: 'flex', gap: '8px' }}>
-                          <button onClick={() => openEdit(movie)} className="action-btn edit-btn" title="Editar">
-                            <Edit2 size={16} />
-                          </button>
-                          <button onClick={() => handleDelete(movie.id)} className="action-btn delete-btn" title="Excluir">
-                            <Trash2 size={16} />
-                          </button>
+
+                      <td>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#FBBF24', fontWeight: 600 }}>
+                          <Star size={14} fill="#FBBF24" />
+                          <span>{m.vote_average ? Number(m.vote_average).toFixed(1) : '0.0'}</span>
                         </div>
                       </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-            
-            {/* Paginação */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 24px', background: 'rgba(0,0,0,0.2)', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
-              <div style={{ color: 'var(--text-muted)', fontSize: '14px' }}>
-                Mostrando página <b>{page}</b> {totalMovies > 0 && `de aproximadamente ${Math.ceil(totalMovies / PAGE_SIZE)}`}
-              </div>
-              <div style={{ display: 'flex', gap: '12px' }}>
-                <button 
-                  className="btn-secondary" 
-                  style={{ padding: '8px 16px', display: 'flex', alignItems: 'center', gap: '8px', opacity: page <= 1 ? 0.5 : 1 }} 
-                  onClick={goToPrevPage}
-                  disabled={page <= 1}
-                >
-                  <ChevronLeft size={18} /> Anterior
-                </button>
-                <button 
-                  className="btn-secondary" 
-                  style={{ padding: '8px 16px', display: 'flex', alignItems: 'center', gap: '8px', opacity: !hasMore ? 0.5 : 1 }} 
-                  onClick={goToNextPage}
-                  disabled={!hasMore}
-                >
-                  Próxima <ChevronRight size={18} />
-                </button>
-              </div>
-            </div>
-          </>
-        )}
-      </div>
 
-      {/* MODAL: ADICIONAR FILME */}
+                      <td style={{ maxWidth: '280px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-muted)', fontSize: '0.82rem' }}>
+                        {m.video_url}
+                      </td>
+
+                      <td style={{ textAlign: 'right' }}>
+                        <button
+                          className="btn-danger"
+                          onClick={() => handleDelete(m.id, m.title)}
+                          style={{ padding: '6px 12px', fontSize: '0.8rem', borderRadius: '8px' }}
+                          title="Excluir Filme"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+
+          {/* Paginação */}
+          <div className="pagination-container" style={{ borderRadius: '0 0 var(--radius-xl) var(--radius-xl)' }}>
+            <div className="pagination-info">
+              Página <strong style={{ color: 'var(--text-primary)' }}>{currentPage}</strong> de <strong style={{ color: 'var(--text-primary)' }}>{totalPages}</strong> ({totalMovies} filmes no total)
+            </div>
+
+            <div className="pagination-controls">
+              <button
+                className="pagination-btn"
+                onClick={() => fetchMovies(currentPage - 1, searchTerm)}
+                disabled={currentPage <= 1 || loading}
+              >
+                <ChevronLeft size={16} />
+              </button>
+              <button
+                className="pagination-btn"
+                onClick={() => fetchMovies(currentPage + 1, searchTerm)}
+                disabled={currentPage >= totalPages || loading}
+              >
+                <ChevronRight size={16} />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Novo Filme via TMDB */}
       {isAddModalOpen && (
-        <div className="modal-overlay">
-          <div className="glass-card modal-content" style={{ width: '100%', maxWidth: '600px', maxHeight: '90vh', overflowY: 'auto' }}>
-            <h2 style={{ marginBottom: '24px' }}>Importar Novo Filme</h2>
-            
-            <div style={{ display: 'flex', gap: '12px', marginBottom: '24px' }}>
-              <input 
-                type="text" placeholder="ID do TMDB..." value={tmdbId}
-                onChange={(e) => setTmdbId(e.target.value)}
-              />
-              <button className="btn-secondary" onClick={searchTmdb} disabled={isSearching} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Search size={18} /> {isSearching ? 'Buscando...' : 'Buscar'}
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(0, 0, 0, 0.85)', backdropFilter: 'blur(10px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          padding: '24px', zIndex: 999
+        }}>
+          <div style={{
+            background: 'var(--surface)', border: '1px solid var(--surface-border-bright)',
+            borderRadius: '20px', maxWidth: '520px', width: '100%',
+            overflow: 'hidden', boxShadow: 'var(--shadow-lg)'
+          }}>
+            <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--surface-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 700 }}>Adicionar Filme Manual</h3>
+              <button onClick={() => setIsAddModalOpen(false)} style={{ color: 'var(--text-muted)', padding: '4px' }}>
+                <X size={20} />
               </button>
             </div>
 
-            {preview && (
-              <div style={{ display: 'flex', gap: '24px', marginBottom: '24px', backgroundColor: 'rgba(0,0,0,0.2)', padding: '16px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.05)' }}>
-                <img 
-                  src={`https://image.tmdb.org/t/p/w185${preview.poster_path}`} 
-                  alt={preview.title}
-                  style={{ width: '100px', borderRadius: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.5)' }}
-                />
-                <div>
-                  <h3 style={{ fontSize: '18px', marginBottom: '8px' }}>{preview.title}</h3>
-                  <p style={{ fontSize: '13px', color: 'var(--text-secondary)', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden', lineHeight: '1.5' }}>
-                    {preview.overview}
-                  </p>
+            <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '8px' }}>
+                  ID do Filme no TMDB:
+                </label>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <input
+                    type="number"
+                    placeholder="Ex: 512200"
+                    value={tmdbIdInput}
+                    onChange={(e) => setTmdbIdInput(e.target.value)}
+                    style={{ borderRadius: '10px' }}
+                  />
+                  <button 
+                    type="button" 
+                    className="btn-secondary" 
+                    onClick={searchTmdb}
+                    disabled={isSearchingTmdb}
+                    style={{ borderRadius: '10px' }}
+                  >
+                    {isSearchingTmdb ? 'Buscando...' : 'Buscar'}
+                  </button>
                 </div>
               </div>
-            )}
 
-            <div style={{ marginBottom: '16px' }}>
-              <label style={{ display: 'block', marginBottom: '8px', color: 'var(--text-secondary)', fontSize: '14px', fontWeight: '500' }}>URL do Vídeo (M3U8 ou MP4)</label>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', background: 'rgba(0,0,0,0.2)', border: '1px solid var(--surface-light)', borderRadius: '8px', padding: '0 16px', transition: 'border-color 0.2s' }}>
-                <Video size={18} color="var(--primary-light)" />
-                <input 
-                  type="url" style={{ border: 'none', background: 'transparent', boxShadow: 'none', padding: '14px 0', width: '100%' }}
-                  placeholder="https://servidor.com/filme.m3u8" value={videoUrl} onChange={(e) => setVideoUrl(e.target.value)}
+              <div>
+                <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '8px' }}>
+                  URL do Vídeo (Link de Reprodução .mp4):
+                </label>
+                <input
+                  type="url"
+                  placeholder="http://fhd.site/video.mp4"
+                  value={videoUrlInput}
+                  onChange={(e) => setVideoUrlInput(e.target.value)}
+                  style={{ borderRadius: '10px' }}
                 />
               </div>
+
+              {tmdbPreview && (
+                <div style={{
+                  background: 'rgba(255, 255, 255, 0.03)',
+                  border: '1px solid var(--surface-border)',
+                  borderRadius: '14px',
+                  padding: '16px',
+                  display: 'flex',
+                  gap: '14px'
+                }}>
+                  {tmdbPreview.poster_path && (
+                    <img 
+                      src={`https://image.tmdb.org/t/p/w200${tmdbPreview.poster_path}`} 
+                      alt="Capa" 
+                      style={{ width: '60px', height: '90px', borderRadius: '8px', objectFit: 'cover' }}
+                    />
+                  )}
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: '1rem', color: 'white' }}>{tmdbPreview.title}</div>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '4px' }}>
+                      Lançamento: {tmdbPreview.release_date} • Nota: {tmdbPreview.vote_average}
+                    </div>
+                    <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '6px', maxHeight: '50px', overflow: 'hidden' }}>
+                      {tmdbPreview.overview || 'Sem sinopse disponível.'}
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
 
-            <div style={{ marginBottom: '24px' }}>
-              <label style={{ display: 'block', marginBottom: '8px', color: 'var(--text-secondary)', fontSize: '14px', fontWeight: '500' }}>Categorias / Tags</label>
-              {renderTagsSelector(tags, false)}
-            </div>
-
-            <div style={{ marginBottom: '32px', background: 'rgba(0,0,0,0.2)', padding: '16px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.05)' }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', marginBottom: '16px' }}>
-                  <input type="checkbox" checked={isHighlightAdd} onChange={(e) => setIsHighlightAdd(e.target.checked)} style={{ width: '20px', height: '20px', accentColor: 'var(--primary)' }} />
-                  <span style={{ fontSize: '14px', color: 'var(--text-primary)' }}>⭐ Marcar como Destaque (Banner Principal)</span>
-                </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer' }}>
-                  <input type="checkbox" checked={isNewRelease} onChange={(e) => setIsNewRelease(e.target.checked)} style={{ width: '20px', height: '20px', accentColor: 'var(--primary)' }} />
-                  <span style={{ fontSize: '14px', color: 'var(--text-primary)' }}>🔔 É Lançamento? (Enviar Notificação Push)</span>
-                </label>
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '16px' }}>
-              <button className="btn-secondary" onClick={() => { setIsAddModalOpen(false); resetAddForm(); }}>Cancelar</button>
-              <button className="btn-primary" onClick={handleSaveMovie} disabled={isSaving || !preview}>
-                {isSaving ? 'Salvando...' : 'Salvar Filme'}
+            <div style={{ padding: '16px 24px', borderTop: '1px solid var(--surface-border)', display: 'flex', justifyContent: 'flex-end', gap: '10px', background: 'rgba(0,0,0,0.2)' }}>
+              <button className="btn-secondary" onClick={() => setIsAddModalOpen(false)} style={{ borderRadius: '10px' }}>
+                Cancelar
+              </button>
+              <button 
+                className="btn-primary" 
+                onClick={handleSaveNewMovie} 
+                disabled={!tmdbPreview || !videoUrlInput.trim() || isSaving}
+                style={{ borderRadius: '10px' }}
+              >
+                {isSaving ? 'Salvando...' : 'Salvar no PostgreSQL'}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* MODAL: EDITAR FILME */}
-      {isEditModalOpen && (
-        <div className="modal-overlay">
-          <div className="glass-card modal-content" style={{ width: '100%', maxWidth: '600px', maxHeight: '90vh', overflowY: 'auto' }}>
-            <h2 style={{ marginBottom: '24px' }}>Editar Filme</h2>
-            
-            <div style={{ display: 'flex', gap: '20px', marginBottom: '24px', background: 'rgba(0,0,0,0.2)', padding: '16px', borderRadius: '12px' }}>
-              <img 
-                  src={`https://image.tmdb.org/t/p/w185${editForm.posterPath}`} 
-                  alt={editForm.title}
-                  style={{ width: '100px', borderRadius: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.5)' }}
-              />
-              <div style={{ flex: 1 }}>
-                <label style={{ display: 'block', marginBottom: '8px', color: 'var(--text-secondary)', fontSize: '14px', fontWeight: '500' }}>Título</label>
-                <input 
-                  type="text" value={editForm.title} onChange={(e) => setEditForm({...editForm, title: e.target.value})}
-                  style={{ width: '100%', marginBottom: '16px' }}
-                />
-                <label style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', cursor: 'pointer', background: 'rgba(255,215,0,0.1)', padding: '8px 12px', borderRadius: '8px', border: '1px solid rgba(255,215,0,0.2)' }}>
-                  <input type="checkbox" checked={editForm.isHighlight} onChange={(e) => setEditForm({...editForm, isHighlight: e.target.checked})} style={{ width: '16px', height: '16px', accentColor: '#FFD700' }} />
-                  <span style={{ fontSize: '14px', color: '#FFD700', fontWeight: '600' }}>⭐ Destaque Principal</span>
-                </label>
-              </div>
-            </div>
-
-            <div style={{ marginBottom: '16px' }}>
-              <label style={{ display: 'block', marginBottom: '8px', color: 'var(--text-secondary)', fontSize: '14px', fontWeight: '500' }}>Sinopse</label>
-              <textarea 
-                value={editForm.overview} onChange={(e) => setEditForm({...editForm, overview: e.target.value})}
-                style={{ width: '100%', minHeight: '100px', background: 'rgba(0,0,0,0.2)', border: '1px solid var(--surface-light)', borderRadius: '8px', padding: '12px', color: 'white', lineHeight: '1.5' }}
-              />
-            </div>
-
-            <div style={{ marginBottom: '16px' }}>
-              <label style={{ display: 'block', marginBottom: '8px', color: 'var(--text-secondary)', fontSize: '14px', fontWeight: '500' }}>URL do Vídeo</label>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', background: 'rgba(0,0,0,0.2)', border: '1px solid var(--surface-light)', borderRadius: '8px', padding: '0 16px' }}>
-                <Video size={18} color="var(--primary-light)" />
-                <input 
-                  type="url" style={{ border: 'none', background: 'transparent', boxShadow: 'none', padding: '14px 0', width: '100%' }}
-                  value={editForm.videoUrl} onChange={(e) => setEditForm({...editForm, videoUrl: e.target.value})}
-                />
-              </div>
-            </div>
-
-            <div style={{ marginBottom: '32px' }}>
-              <label style={{ display: 'block', marginBottom: '8px', color: 'var(--text-secondary)', fontSize: '14px', fontWeight: '500' }}>Categorias / Tags</label>
-              {renderTagsSelector(editForm.tags, true)}
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '16px' }}>
-              <button className="btn-secondary" onClick={() => setIsEditModalOpen(false)}>Cancelar</button>
-              <button className="btn-primary" onClick={handleUpdateMovie} disabled={isSaving}>
-                {isSaving ? 'Salvando...' : 'Salvar Alterações'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
