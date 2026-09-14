@@ -5,6 +5,7 @@ import axios from 'axios';
 import { Bell, Search, Send, Film, Tv, CheckCircle, Image, Sparkles, Smartphone } from 'lucide-react';
 
 const SERIES_API_URL = 'https://series.leflow.com.br';
+const NOTIFICATION_API_URL = import.meta.env.VITE_API_URL || 'https://api.leflow.com.br';
 
 function NotificationsAdmin() {
   const [title, setTitle] = useState('');
@@ -15,6 +16,7 @@ function NotificationsAdmin() {
   const [searchResults, setSearchResults] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
   const [successModal, setSuccessModal] = useState(false);
+  const [selectedContent, setSelectedContent] = useState(null);
 
   const handleSearch = async (e) => {
     e.preventDefault();
@@ -79,6 +81,10 @@ function NotificationsAdmin() {
       }
       setImageUrl(img);
     }
+    setSelectedContent({
+      id: item.id,
+      type: item.type === 'Filme' ? 'movie' : 'tv'
+    });
     setSearchResults([]);
     setSearchQuery('');
   };
@@ -92,11 +98,30 @@ function NotificationsAdmin() {
 
     setSending(true);
     try {
+      // 1. Disparar notificação Push via FCM pelo backend de notificações
+      const payload = {
+        title: title.trim(),
+        body: body.trim(),
+        ...(imageUrl.trim() ? { imageUrl: imageUrl.trim() } : {}),
+        ...(selectedContent?.id ? { contentId: String(selectedContent.id) } : {}),
+        ...(selectedContent?.type ? { contentType: String(selectedContent.type) } : {})
+      };
+
+      const res = await axios.post(`${NOTIFICATION_API_URL}/api/notifications/send`, payload);
+
+      if (!res.data?.success) {
+        throw new Error(res.data?.error || 'Falha ao disparar push no servidor.');
+      }
+
+      // 2. Salvar histórico no Firestore
       await addDoc(collection(db, 'notifications'), {
         title: title.trim(),
         body: body.trim(),
         imageUrl: imageUrl.trim() || null,
-        status: 'pending',
+        contentId: selectedContent?.id || null,
+        contentType: selectedContent?.type || null,
+        status: 'sent',
+        fcmResponse: res.data?.response || null,
         createdAt: serverTimestamp()
       });
 
@@ -104,9 +129,11 @@ function NotificationsAdmin() {
       setTitle('');
       setBody('');
       setImageUrl('');
+      setSelectedContent(null);
     } catch (err) {
       console.error("Erro ao enviar notificação:", err);
-      alert("Erro ao disparar notificação: " + err.message);
+      const errMsg = err.response?.data?.error || err.message;
+      alert("Erro ao disparar notificação: " + errMsg);
     } finally {
       setSending(false);
     }
