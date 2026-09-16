@@ -49,6 +49,8 @@ function PromotionsAdmin() {
   const [contentId, setContentId] = useState('');
   const [contentType, setContentType] = useState(null); // 'movie' | 'tv' | null
   const [isAdding, setIsAdding] = useState(false);
+  const [overview, setOverview] = useState("");
+  const [rating, setRating] = useState(0);
 
   // Busca de Conteúdo do Catálogo
   const [searchQuery, setSearchQuery] = useState('');
@@ -86,6 +88,7 @@ function PromotionsAdmin() {
           id: m.id,
           title: m.title,
           overview: m.overview || '',
+          voteAverage: m.vote_average || m.voteAverage || 0,
           posterPath: m.poster_path,
           backdropPath: m.backdrop_path,
           type: 'movie',
@@ -125,6 +128,7 @@ function PromotionsAdmin() {
           id: s.id,
           title: s.title,
           overview: s.overview || '',
+          voteAverage: s.vote_average || s.voteAverage || 0,
           posterPath: s.poster_path,
           backdropPath: s.backdrop_path,
           type: 'tv',
@@ -154,6 +158,8 @@ function PromotionsAdmin() {
     setImageUrl(img);
     setContentId(String(item.id));
     setContentType(item.type);
+    setOverview(item.overview || "");
+    setRating(item.voteAverage || 0);
     setTargetUrl('');
     setSearchResults([]);
     setSearchQuery('');
@@ -181,6 +187,8 @@ function PromotionsAdmin() {
         contentId: isCatalog && contentId ? String(contentId) : null,
         contentType: isCatalog && contentType ? String(contentType) : null,
         type: isCatalog ? (contentType === 'tv' ? 'series' : 'movie') : 'product',
+        overview: isCatalog ? (overview || '').trim() : '',
+        rating: isCatalog ? (Number(rating) || 0) : 0,
         isActive: true,
         createdAt: serverTimestamp()
       });
@@ -191,6 +199,8 @@ function PromotionsAdmin() {
       setTargetUrl('');
       setContentId('');
       setContentType(null);
+      setOverview("");
+      setRating(0);
       setSearchQuery('');
       setSearchResults([]);
       alert("Destaque adicionado ao carrossel com sucesso!");
