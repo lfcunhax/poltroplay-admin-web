@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
 import { 
   Film, Plus, Search, Trash2, Edit2, Star, 
@@ -21,6 +21,7 @@ function MoviesAdmin() {
 
   // Filtro de capa: 'all' | 'withoutCover'
   const [filterCover, setFilterCover] = useState('all');
+  const [missingCoverCount, setMissingCoverCount] = useState(null);
 
   // Modal Novo Filme
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -41,25 +42,50 @@ function MoviesAdmin() {
   const [isSavingCover, setIsSavingCover] = useState(false);
 
   useEffect(() => {
+    fetchMissingCount();
     fetchMovies(1, searchTerm, filterCover);
-  }, [filterCover]);
+  }, []);
+
+  const fetchMissingCount = async () => {
+    try {
+      const res = await axios.get(`${SERIES_API_URL}/movies?limit=4000`);
+      const all = res.data?.movies || [];
+      const count = all.filter(m => !m.poster_path || !m.poster_path.trim()).length;
+      setMissingCoverCount(count);
+    } catch (_) {}
+  };
 
   const fetchMovies = async (page = 1, search = '', coverMode = filterCover) => {
     setLoading(true);
     try {
-      let url = `${SERIES_API_URL}/movies?page=${page}&limit=${PAGE_SIZE}`;
-      if (search.trim()) {
-        url += `&search=${encodeURIComponent(search.trim())}`;
-      }
       if (coverMode === 'withoutCover') {
-        url += '&withoutCover=true';
+        // Busca lote completo para garantir filtragem 100% precisa no cliente mesmo antes do redeploy do backend
+        let url = `${SERIES_API_URL}/movies?limit=4000&withoutCover=true`;
+        if (search.trim()) {
+          url += `&search=${encodeURIComponent(search.trim())}`;
+        }
+        const res = await axios.get(url);
+        const allFetched = res.data?.movies || [];
+        // FILTRAGEM ESTRITA: Apenas filmes que realmente NÃO têm capa/pôster
+        const withoutCoverList = allFetched.filter(m => !m.poster_path || !m.poster_path.trim());
+        
+        setMovies(withoutCoverList);
+        setTotalMovies(withoutCoverList.length);
+        setMissingCoverCount(withoutCoverList.length);
+        setCurrentPage(page);
+        setTotalPages(Math.max(1, Math.ceil(withoutCoverList.length / PAGE_SIZE)));
+      } else {
+        let url = `${SERIES_API_URL}/movies?page=${page}&limit=${PAGE_SIZE}`;
+        if (search.trim()) {
+          url += `&search=${encodeURIComponent(search.trim())}`;
+        }
+        const res = await axios.get(url);
+        const data = res.data || {};
+        setMovies(data.movies || []);
+        setTotalMovies(data.total || 0);
+        setCurrentPage(data.page || 1);
+        setTotalPages(data.totalPages || 1);
       }
-      const res = await axios.get(url);
-      const data = res.data || {};
-      setMovies(data.movies || []);
-      setTotalMovies(data.total || 0);
-      setCurrentPage(data.page || 1);
-      setTotalPages(data.totalPages || 1);
     } catch (err) {
       console.error("Erro ao buscar filmes:", err);
     } finally {
@@ -67,10 +93,36 @@ function MoviesAdmin() {
     }
   };
 
+  const handleSwitchFilterCover = (mode) => {
+    setFilterCover(mode);
+    setCurrentPage(1);
+    fetchMovies(1, searchTerm, mode);
+  };
+
+  const handlePageChange = (newPage) => {
+    if (newPage < 1 || newPage > totalPages) return;
+    if (filterCover === 'withoutCover') {
+      setCurrentPage(newPage);
+    } else {
+      fetchMovies(newPage, searchTerm, 'all');
+    }
+  };
+
   const handleSearchSubmit = (e) => {
     e.preventDefault();
+    setCurrentPage(1);
     fetchMovies(1, searchTerm, filterCover);
   };
+
+  // Garante que a lista renderizada de filmes seja rigorosamente filtrada
+  const displayedMovies = useMemo(() => {
+    if (filterCover === 'withoutCover') {
+      const strictlyWithout = movies.filter(m => !m.poster_path || !m.poster_path.trim());
+      const startIndex = (currentPage - 1) * PAGE_SIZE;
+      return strictlyWithout.slice(startIndex, startIndex + PAGE_SIZE);
+    }
+    return movies;
+  }, [movies, filterCover, currentPage]);
 
   const handleDelete = async (id, title) => {
     if (!window.confirm(`Tem certeza que deseja excluir permanentemente o filme "${title}" do PostgreSQL?`)) {
@@ -223,13 +275,42 @@ function MoviesAdmin() {
         return;
       }
 
-      await axios.patch(`${SERIES_API_URL}/movies/${coverModalMovie.id}`, payload, {
-        headers: { 'x-admin-secret': ADMIN_SECRET }
-      });
+      let updated = false;
+      try {
+        const patchRes = await axios.patch(`${SERIES_API_URL}/movies/${coverModalMovie.id}`, payload, {
+          headers: { 'x-admin-secret': ADMIN_SECRET }
+        });
+        if (patchRes.data?.poster_path) {
+          updated = true;
+        }
+      } catch (patchErr) {
+        console.warn("PATCH direto falhou, tentando sincronização:", patchErr.message);
+      }
+
+      // Se o PATCH não persistir o poster_path, aciona sincronização
+      if (!updated) {
+        await axios.post(`${SERIES_API_URL}/movies/sync`, {
+          movies: [{
+            id: coverModalMovie.id,
+            tmdbId: payload.tmdbId,
+            title: coverModalMovie.title,
+            overview: payload.overview,
+            posterPath: payload.posterPath,
+            backdropPath: payload.backdropPath,
+            voteAverage: payload.voteAverage,
+            releaseDate: payload.releaseDate,
+            videoUrl: coverModalMovie.video_url || ''
+          }]
+        }, {
+          headers: { 'x-admin-secret': ADMIN_SECRET }
+        });
+      }
 
       alert(`Capa do filme "${coverModalMovie.title}" atualizada com sucesso!`);
       setCoverModalMovie(null);
       setCoverPreview(null);
+      setCoverSearchResults([]);
+      fetchMissingCount();
       fetchMovies(currentPage, searchTerm, filterCover);
     } catch (err) {
       console.error("Erro ao salvar capa:", err);
@@ -277,13 +358,18 @@ function MoviesAdmin() {
       {/* Barra de Filtros, Seletor "Sem Capa" e Estatísticas */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px' }}>
         <div className="stat-card">
-          <div className="stat-icon-wrapper" style={{ background: 'rgba(0, 212, 255, 0.15)', color: 'var(--accent)' }}>
-            <Film size={24} />
+          <div className="stat-icon-wrapper" style={{ 
+            background: filterCover === 'withoutCover' ? 'rgba(239, 68, 68, 0.15)' : 'rgba(0, 212, 255, 0.15)', 
+            color: filterCover === 'withoutCover' ? '#F87171' : 'var(--accent)' 
+          }}>
+            {filterCover === 'withoutCover' ? <AlertTriangle size={24} /> : <Film size={24} />}
           </div>
           <div className="stat-info">
-            <div className="stat-value">{totalMovies}</div>
+            <div className="stat-value" style={{ color: filterCover === 'withoutCover' ? '#F87171' : undefined }}>
+              {totalMovies}
+            </div>
             <div className="stat-label">
-              {filterCover === 'withoutCover' ? 'Filmes Sem Capa' : 'Total de Filmes no PostgreSQL'}
+              {filterCover === 'withoutCover' ? 'Filmes Sem Capa (Aguardando Pôster)' : 'Total de Filmes no PostgreSQL'}
             </div>
           </div>
         </div>
@@ -292,7 +378,7 @@ function MoviesAdmin() {
         <div className="glass-card" style={{ padding: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
           <button
             type="button"
-            onClick={() => setFilterCover('all')}
+            onClick={() => handleSwitchFilterCover('all')}
             style={{
               flex: 1,
               padding: '10px 14px',
@@ -316,7 +402,7 @@ function MoviesAdmin() {
 
           <button
             type="button"
-            onClick={() => setFilterCover('withoutCover')}
+            onClick={() => handleSwitchFilterCover('withoutCover')}
             style={{
               flex: 1,
               padding: '10px 14px',
@@ -335,7 +421,7 @@ function MoviesAdmin() {
             }}
           >
             <AlertTriangle size={16} />
-            Sem Capa ⚠️
+            Sem Capa ⚠️ {missingCoverCount !== null ? `(${missingCoverCount})` : ''}
           </button>
         </div>
 
@@ -378,7 +464,7 @@ function MoviesAdmin() {
               </tr>
             </thead>
             <tbody>
-              {movies.length === 0 ? (
+              {displayedMovies.length === 0 ? (
                 <tr>
                   <td colSpan="5" style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
                     {filterCover === 'withoutCover' 
@@ -387,7 +473,7 @@ function MoviesAdmin() {
                   </td>
                 </tr>
               ) : (
-                movies.map(m => {
+                displayedMovies.map(m => {
                   const hasPoster = Boolean(m.poster_path && m.poster_path.trim());
                   const posterUrl = hasPoster 
                     ? (m.poster_path.startsWith('http') ? m.poster_path : `https://image.tmdb.org/t/p/w200${m.poster_path}`)
@@ -512,14 +598,14 @@ function MoviesAdmin() {
             <div className="pagination-controls">
               <button
                 className="pagination-btn"
-                onClick={() => fetchMovies(currentPage - 1, searchTerm, filterCover)}
+                onClick={() => handlePageChange(currentPage - 1)}
                 disabled={currentPage <= 1 || loading}
               >
                 <ChevronLeft size={16} />
               </button>
               <button
                 className="pagination-btn"
-                onClick={() => fetchMovies(currentPage + 1, searchTerm, filterCover)}
+                onClick={() => handlePageChange(currentPage + 1)}
                 disabled={currentPage >= totalPages || loading}
               >
                 <ChevronRight size={16} />

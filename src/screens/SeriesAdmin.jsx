@@ -22,6 +22,7 @@ function SeriesAdmin() {
 
   // Filtro de capa: 'all' | 'withoutCover'
   const [filterCover, setFilterCover] = useState('all');
+  const [missingCoverCount, setMissingCoverCount] = useState(null);
 
   // Episódios Modal
   const [selectedSeries, setSelectedSeries] = useState(null);
@@ -58,25 +59,50 @@ function SeriesAdmin() {
   const [auditResults, setAuditResults] = useState([]);
 
   useEffect(() => {
+    fetchMissingCount();
     fetchSeries(1, searchTerm, filterCover);
-  }, [filterCover]);
+  }, []);
+
+  const fetchMissingCount = async () => {
+    try {
+      const res = await axios.get(`${SERIES_API_URL}/series?limit=1000`);
+      const all = res.data?.series || [];
+      const count = all.filter(s => !s.poster_path || !s.poster_path.trim()).length;
+      setMissingCoverCount(count);
+    } catch (_) {}
+  };
 
   const fetchSeries = async (page = 1, search = '', coverMode = filterCover) => {
     setLoading(true);
     try {
-      let url = `${SERIES_API_URL}/series?page=${page}&limit=${PAGE_SIZE}`;
-      if (search.trim()) {
-        url += `&search=${encodeURIComponent(search.trim())}`;
-      }
       if (coverMode === 'withoutCover') {
-        url += '&withoutCover=true';
+        // Busca lote completo para garantir filtragem precisa no cliente mesmo antes do redeploy do backend
+        let url = `${SERIES_API_URL}/series?limit=1000&withoutCover=true`;
+        if (search.trim()) {
+          url += `&search=${encodeURIComponent(search.trim())}`;
+        }
+        const res = await axios.get(url);
+        const allFetched = res.data?.series || [];
+        // FILTRAGEM ESTRITA: Apenas séries que realmente NÃO têm poster
+        const withoutCoverList = allFetched.filter(s => !s.poster_path || !s.poster_path.trim());
+        
+        setSeries(withoutCoverList);
+        setTotalSeries(withoutCoverList.length);
+        setMissingCoverCount(withoutCoverList.length);
+        setCurrentPage(page);
+        setTotalPages(Math.max(1, Math.ceil(withoutCoverList.length / PAGE_SIZE)));
+      } else {
+        let url = `${SERIES_API_URL}/series?page=${page}&limit=${PAGE_SIZE}`;
+        if (search.trim()) {
+          url += `&search=${encodeURIComponent(search.trim())}`;
+        }
+        const res = await axios.get(url);
+        const data = res.data || {};
+        setSeries(data.series || []);
+        setTotalSeries(data.total || 0);
+        setCurrentPage(data.page || 1);
+        setTotalPages(data.totalPages || 1);
       }
-      const res = await axios.get(url);
-      const data = res.data || {};
-      setSeries(data.series || []);
-      setTotalSeries(data.total || 0);
-      setCurrentPage(data.page || 1);
-      setTotalPages(data.totalPages || 1);
     } catch (err) {
       console.error("Erro ao buscar séries:", err);
     } finally {
@@ -84,10 +110,36 @@ function SeriesAdmin() {
     }
   };
 
+  const handleSwitchFilterCover = (mode) => {
+    setFilterCover(mode);
+    setCurrentPage(1);
+    fetchSeries(1, searchTerm, mode);
+  };
+
+  const handlePageChange = (newPage) => {
+    if (newPage < 1 || newPage > totalPages) return;
+    if (filterCover === 'withoutCover') {
+      setCurrentPage(newPage);
+    } else {
+      fetchSeries(newPage, searchTerm, 'all');
+    }
+  };
+
   const handleSearchSubmit = (e) => {
     e.preventDefault();
+    setCurrentPage(1);
     fetchSeries(1, searchTerm, filterCover);
   };
+
+  // Garante que a lista renderizada seja rigorosamente filtrada
+  const displayedSeries = useMemo(() => {
+    if (filterCover === 'withoutCover') {
+      const strictlyWithout = series.filter(s => !s.poster_path || !s.poster_path.trim());
+      const startIndex = (currentPage - 1) * PAGE_SIZE;
+      return strictlyWithout.slice(startIndex, startIndex + PAGE_SIZE);
+    }
+    return series;
+  }, [series, filterCover, currentPage]);
 
   const handleDelete = async (id, title) => {
     if (!window.confirm(`Tem certeza que deseja excluir permanentemente a série "${title}" do PostgreSQL?\nIsso também removerá todos os seus episódios.`)) {
@@ -318,13 +370,41 @@ function SeriesAdmin() {
         return;
       }
 
-      await axios.patch(`${SERIES_API_URL}/series/${coverModalSeries.id}`, payload, {
-        headers: { 'x-admin-secret': ADMIN_SECRET }
-      });
+      let updated = false;
+      try {
+        const patchRes = await axios.patch(`${SERIES_API_URL}/series/${coverModalSeries.id}`, payload, {
+          headers: { 'x-admin-secret': ADMIN_SECRET }
+        });
+        if (patchRes.data?.poster_path) {
+          updated = true;
+        }
+      } catch (patchErr) {
+        console.warn("PATCH direto falhou, tentando sincronização:", patchErr.message);
+      }
+
+      // Se o backend remoto ainda não tiver reiniciado com o PATCH expandido, utiliza o /series/sync que já atualiza por ID
+      if (!updated) {
+        await axios.post(`${SERIES_API_URL}/series/sync`, {
+          series: [{
+            id: coverModalSeries.id,
+            tmdbId: payload.tmdbId,
+            title: coverModalSeries.title,
+            overview: payload.overview,
+            posterPath: payload.posterPath,
+            backdropPath: payload.backdropPath,
+            voteAverage: payload.voteAverage,
+            releaseDate: payload.releaseDate
+          }]
+        }, {
+          headers: { 'x-admin-secret': ADMIN_SECRET }
+        });
+      }
 
       alert(`Capa da série "${coverModalSeries.title}" atualizada com sucesso!`);
       setCoverModalSeries(null);
       setCoverPreview(null);
+      setCoverSearchResults([]);
+      fetchMissingCount();
       fetchSeries(currentPage, searchTerm, filterCover);
     } catch (err) {
       console.error("Erro ao salvar capa:", err);
@@ -477,13 +557,18 @@ function SeriesAdmin() {
       {/* Barra de Filtros, Seletor "Sem Capa" e Estatísticas */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px' }}>
         <div className="stat-card">
-          <div className="stat-icon-wrapper" style={{ background: 'rgba(123, 47, 247, 0.15)', color: 'var(--primary-light)' }}>
-            <Tv size={24} />
+          <div className="stat-icon-wrapper" style={{ 
+            background: filterCover === 'withoutCover' ? 'rgba(239, 68, 68, 0.15)' : 'rgba(123, 47, 247, 0.15)', 
+            color: filterCover === 'withoutCover' ? '#F87171' : 'var(--primary-light)' 
+          }}>
+            {filterCover === 'withoutCover' ? <AlertTriangle size={24} /> : <Tv size={24} />}
           </div>
           <div className="stat-info">
-            <div className="stat-value">{totalSeries}</div>
+            <div className="stat-value" style={{ color: filterCover === 'withoutCover' ? '#F87171' : undefined }}>
+              {totalSeries}
+            </div>
             <div className="stat-label">
-              {filterCover === 'withoutCover' ? 'Séries Sem Capa' : 'Total no PostgreSQL'}
+              {filterCover === 'withoutCover' ? 'Séries Sem Capa (Aguardando Pôster)' : 'Total no PostgreSQL'}
             </div>
           </div>
         </div>
@@ -492,7 +577,7 @@ function SeriesAdmin() {
         <div className="glass-card" style={{ padding: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
           <button
             type="button"
-            onClick={() => setFilterCover('all')}
+            onClick={() => handleSwitchFilterCover('all')}
             style={{
               flex: 1,
               padding: '10px 14px',
@@ -516,7 +601,7 @@ function SeriesAdmin() {
 
           <button
             type="button"
-            onClick={() => setFilterCover('withoutCover')}
+            onClick={() => handleSwitchFilterCover('withoutCover')}
             style={{
               flex: 1,
               padding: '10px 14px',
@@ -535,7 +620,7 @@ function SeriesAdmin() {
             }}
           >
             <AlertTriangle size={16} />
-            Sem Capa ⚠️
+            Sem Capa ⚠️ {missingCoverCount !== null ? `(${missingCoverCount})` : ''}
           </button>
         </div>
 
@@ -578,7 +663,7 @@ function SeriesAdmin() {
               </tr>
             </thead>
             <tbody>
-              {series.length === 0 ? (
+              {displayedSeries.length === 0 ? (
                 <tr>
                   <td colSpan="5" style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
                     {filterCover === 'withoutCover' 
@@ -587,7 +672,7 @@ function SeriesAdmin() {
                   </td>
                 </tr>
               ) : (
-                series.map(s => {
+                displayedSeries.map(s => {
                   const hasPoster = Boolean(s.poster_path && s.poster_path.trim());
                   const posterUrl = hasPoster 
                     ? (s.poster_path.startsWith('http') ? s.poster_path : `https://image.tmdb.org/t/p/w200${s.poster_path}`)
@@ -725,14 +810,14 @@ function SeriesAdmin() {
             <div className="pagination-controls">
               <button
                 className="pagination-btn"
-                onClick={() => fetchSeries(currentPage - 1, searchTerm, filterCover)}
+                onClick={() => handlePageChange(currentPage - 1)}
                 disabled={currentPage <= 1 || loading}
               >
                 <ChevronLeft size={16} />
               </button>
               <button
                 className="pagination-btn"
-                onClick={() => fetchSeries(currentPage + 1, searchTerm, filterCover)}
+                onClick={() => handlePageChange(currentPage + 1)}
                 disabled={currentPage >= totalPages || loading}
               >
                 <ChevronRight size={16} />
